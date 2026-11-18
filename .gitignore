@@ -11,3 +11,4 @@ data/
 # Never commit real Letterboxd/Simkl exports; fixtures must be anonymized
 exports/
 *.zip
+.ruff_cache/
