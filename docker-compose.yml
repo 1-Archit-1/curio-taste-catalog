@@ -1,0 +1,58 @@
+# Works with `docker compose` (v2) and legacy `docker-compose` 1.29.
+# Configure via .env (see .env.example). Scale workers with WORKER_REPLICAS
+# or `--scale worker=N`.
+x-app: &app
+  build: .
+  image: curio:dev
+  environment:
+    DATABASE_URL: postgresql://${POSTGRES_USER:-curio}:${POSTGRES_PASSWORD:-curio}@postgres:5432/${POSTGRES_DB:-curio}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # uvicorn reads its --workers default from WEB_CONCURRENCY (api only).
+    WEB_CONCURRENCY: ${API_WORKERS:-2}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-curio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-curio}
+      POSTGRES_DB: ${POSTGRES_DB:-curio}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *app
+    command: ["python", "-m", "curio.db.migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "curio.worker"]
+    restart: unless-stopped
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
