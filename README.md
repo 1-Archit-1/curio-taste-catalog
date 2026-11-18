@@ -6,27 +6,26 @@ Status: project skeleton. See the [milestones](https://github.com/1-Archit-1/cur
 
 ## Quickstart
 
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Docker.
+Requires Python 3.12, [uv](https://docs.astral.sh/uv/), and Docker with Compose v2 (`docker compose`).
 
 ```sh
 uv sync                      # create .venv and install dependencies (incl. dev tools)
 cp .env.example .env         # optional: change ports, counts, password
-docker-compose up -d --build # postgres, migrate (one-shot), api, worker
+docker compose up -d --build # postgres, migrate (one-shot), api, worker
 curl http://127.0.0.1:8000/healthz
-docker-compose logs -f worker
-docker-compose down          # add -v to also delete the database volume
+docker compose logs -f worker
+docker compose down          # add -v to also delete the database volume
 ```
 
-`docker compose` (v2) works the same way. With legacy `docker-compose` 1.29 on Docker 29+, use `up -d`: attached `up` crashes while streaming container events.
 
-Process counts come from `.env`: `API_WORKERS` (uvicorn workers in the api container) and `WORKER_REPLICAS` (worker containers). `docker-compose up -d --scale worker=3` also works.
+Process counts come from `.env`: `API_WORKERS` (uvicorn workers in the api container) and `WORKER_REPLICAS` (worker containers). `docker compose up -d --scale worker=3` also works.
 
 ### Migrations
 
 Migrations are numbered SQL files in `src/curio/db/migrations/`. The `migrate` service applies them before api and worker start. To run them by hand (safe to repeat):
 
 ```sh
-docker-compose run --rm migrate
+docker compose run --rm migrate
 # or from the host, against the compose Postgres:
 DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run python -m curio.db.migrate
 ```
@@ -34,7 +33,7 @@ DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run python -m curi
 ### Running locally without containers for the app
 
 ```sh
-docker-compose up -d postgres
+docker compose up -d postgres
 export DATABASE_URL=postgresql://curio:curio@localhost:5432/curio  # or set it in .env
 uv run python -m curio.db.migrate
 uv run uvicorn --factory curio.api.app:create_app --reload

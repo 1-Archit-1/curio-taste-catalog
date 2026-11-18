@@ -11,7 +11,7 @@ Nuvio / browser ──HTTP──▶ api (N uvicorn workers) ──┐
                           migrate (one-shot, before api/worker start)
 ```
 
-- **api**: stateless FastAPI app (`uvicorn --factory curio.api.app:create_app`). Any number of uvicorn workers and containers can run, because no state lives in the process. Set the count with `API_WORKERS`.
+- **api**: stateless FastAPI app (`uvicorn --factory curio.api.app:create_app`). Any number of uvicorn workers and containers can run, because no state lives in the process. Set the count with `API_WORKERS`. Uvicorn's own `--workers` manager (0.30+) restarts crashed workers, so gunicorn isn't needed. To scale across machines instead, set `API_WORKERS=1` and run more api containers.
 - **worker**: background processes (`python -m curio.worker`). Currently a stub that logs a DB heartbeat and exits cleanly on SIGTERM. The job queue (#7) will have workers claim jobs with `SELECT ... FOR UPDATE SKIP LOCKED` and report progress via `NOTIFY`, which lets any api process stream it. Set the count with `WORKER_REPLICAS` or `--scale worker=N`.
 - **migrate**: applies schema migrations and exits. api and worker start only after it succeeds.
 

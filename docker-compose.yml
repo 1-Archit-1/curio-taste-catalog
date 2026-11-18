@@ -1,4 +1,4 @@
-# Works with `docker compose` (v2) and legacy `docker-compose` 1.29.
+# Requires Docker Compose v2 (`docker compose`).
 # Configure via .env (see .env.example). Scale workers with WORKER_REPLICAS
 # or `--scale worker=N`.
 x-app: &app
