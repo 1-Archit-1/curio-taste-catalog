@@ -38,7 +38,7 @@ Rules:
 - Only `repositories` contain SQL. The exception is the migration runner and the `.sql` files it applies.
 - `clients` never touch the database. Services fetch with a client, then save with a repository.
 - Public addon routes (`api/routers/addon.py`; unauthenticated, CORS `*`) and authenticated control-plane routes (`api/routers/control.py`, under `/api`) are separate routers so auth and CORS policy apply per router.
-- No module-level DB state. `create_app()` builds the app; the lifespan opens an `AsyncConnectionPool` and stores it on `app.state.pool`. Routes get a connection through the `get_conn` dependency (`api/deps.py`), which commits on success and rolls back on error.
+- No module-level DB state. `create_app()` builds the app; the lifespan opens an `AsyncConnectionPool` and stores it on `app.state.pool`. Routes get a connection through the `get_conn` dependency (`api/deps.py`), which commits on success and rolls back on error. Code that needs an explicit transaction uses `async with conn.transaction():` and never calls `conn.commit()`; inside the test fixture's transaction that becomes a savepoint, so test isolation still holds.
 
 ## Data ownership
 

@@ -19,4 +19,4 @@ No scraping and no unofficial API use.
 - Curio stays within Letterboxd's terms.
 - Full history arrives only when a user uploads a fresh export; RSS covers recent diary entries in between.
 - TMDB IDs in the RSS make matching to TMDB metadata direct. CSV rows need title/year matching.
-- Friends' taste is available only through their public diary RSS.
+- Friends' taste comes from their public diary RSS (recent entries only) or from an export they download from their own account and share.
