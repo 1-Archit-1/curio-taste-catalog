@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from curio import ADDON_NAME
-from curio.api.routers import addon, control, health
+from curio.api.routers import addon, control, health, ui
 from curio.db.pool import create_pool
 from curio.settings import Settings
 
@@ -32,8 +32,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     app.include_router(health.router)
-    app.include_router(addon.router)
     app.include_router(control.router)
+    app.include_router(ui.router)
+    app.include_router(addon.router)
 
     @app.exception_handler(psycopg.OperationalError)
     async def database_unavailable(request: Request, exc: psycopg.OperationalError):

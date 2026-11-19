@@ -15,6 +15,7 @@ import pytest
 
 from curio.api.app import create_app
 from curio.api.deps import get_conn
+from curio.crypto import Keypair, generate_keypair
 from curio.db.migrate import migrate
 from curio.settings import Settings
 
@@ -48,15 +49,30 @@ async def conn(migrated_database_url: str) -> AsyncIterator[psycopg.AsyncConnect
         await conn.close()
 
 
+@pytest.fixture(scope="session")
+def keypair() -> Keypair:
+    return generate_keypair()
+
+
 @pytest.fixture
 async def client(
-    conn: psycopg.AsyncConnection, migrated_database_url: str
+    conn: psycopg.AsyncConnection,
+    migrated_database_url: str,
+    keypair: Keypair,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """API client whose routes share the test's rolled-back connection.
 
+    Configured with KEY_PUBLIC_KEY only (no KEY_PRIVATE_KEY), matching ADR 0002.
     The app lifespan is not run, so no pool is opened.
     """
-    app = create_app(Settings(_env_file=None, database_url=migrated_database_url))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            database_url=migrated_database_url,
+            key_public_key=keypair.public_key,
+            key_private_key=None,
+        )
+    )
 
     async def test_conn() -> AsyncIterator[psycopg.AsyncConnection]:
         yield conn

@@ -37,6 +37,14 @@ services:
 
   api:
     <<: *app
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-curio}:${POSTGRES_PASSWORD:-curio}@postgres:5432/${POSTGRES_DB:-curio}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WEB_CONCURRENCY: ${API_WORKERS:-2}
+      # API holds ONLY the public key (ADR 0002): it can encrypt keys but never decrypt them.
+      KEY_PUBLIC_KEY: ${KEY_PUBLIC_KEY:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     restart: unless-stopped
@@ -46,6 +54,11 @@ services:
 
   worker:
     <<: *app
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-curio}:${POSTGRES_PASSWORD:-curio}@postgres:5432/${POSTGRES_DB:-curio}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Only workers hold the private key (ADR 0002).
+      KEY_PRIVATE_KEY: ${KEY_PRIVATE_KEY:-}
     command: ["python", "-m", "curio.worker"]
     restart: unless-stopped
     deploy:
