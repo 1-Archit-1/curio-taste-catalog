@@ -4,8 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-import psycopg
-from psycopg.rows import class_row
+from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from curio.db.models.keys import KeyDecryptAudit, UserApiKey
 
 
 @dataclass(frozen=True)
@@ -25,169 +28,181 @@ class EncryptedApiKeyRow:
     last4: str
 
 
-@dataclass(frozen=True)
-class AuditEntryRow:
-    user_id: UUID
-    id: int
-    key_type: str
-    job_id: str | None
-    reason: str
-    created_at: datetime
-
-
 async def upsert_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: str,
     encrypted_key: bytes,
     last4: str,
 ) -> ApiKeyMetadataRow:
-    async with conn.cursor(row_factory=class_row(ApiKeyMetadataRow)) as cur:
-        await cur.execute(
-            """
-            INSERT INTO user_api_keys (user_id, key_type, encrypted_key, last4)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (user_id, key_type) DO UPDATE
-            SET encrypted_key = EXCLUDED.encrypted_key,
-                last4 = EXCLUDED.last4,
-                updated_at = now()
-            RETURNING user_id, key_type, last4, created_at, updated_at
-            """,
-            (user_id, key_type, encrypted_key, last4),
-        )
-        row = await cur.fetchone()
-    assert row is not None
-    return row
+    insert_stmt = postgresql.insert(UserApiKey).values(
+        user_id=user_id,
+        key_type=key_type,
+        encrypted_key=encrypted_key,
+        last4=last4,
+    )
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=[UserApiKey.user_id, UserApiKey.key_type],
+        set_={
+            "encrypted_key": insert_stmt.excluded.encrypted_key,
+            "last4": insert_stmt.excluded.last4,
+            "updated_at": func.now(),
+        },
+    ).returning(
+        UserApiKey.user_id,
+        UserApiKey.key_type,
+        UserApiKey.last4,
+        UserApiKey.created_at,
+        UserApiKey.updated_at,
+    )
+    row = (await session.execute(stmt)).one()
+    return ApiKeyMetadataRow(
+        user_id=row.user_id,
+        key_type=row.key_type,
+        last4=row.last4,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 async def list_api_key_metadata(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
 ) -> list[ApiKeyMetadataRow]:
-    async with conn.cursor(row_factory=class_row(ApiKeyMetadataRow)) as cur:
-        await cur.execute(
-            """
-            SELECT user_id, key_type, last4, created_at, updated_at
-            FROM user_api_keys
-            WHERE user_id = %s
-            ORDER BY key_type
-            """,
-            (user_id,),
+    # Display query: never select encrypted_key.
+    stmt = (
+        select(
+            UserApiKey.user_id,
+            UserApiKey.key_type,
+            UserApiKey.last4,
+            UserApiKey.created_at,
+            UserApiKey.updated_at,
         )
-        return list(await cur.fetchall())
+        .where(UserApiKey.user_id == user_id)
+        .order_by(UserApiKey.key_type)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        ApiKeyMetadataRow(
+            user_id=row.user_id,
+            key_type=row.key_type,
+            last4=row.last4,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
 
 
 async def get_encrypted_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: str,
 ) -> EncryptedApiKeyRow | None:
-    async with conn.cursor(row_factory=class_row(EncryptedApiKeyRow)) as cur:
-        await cur.execute(
-            """
-            SELECT user_id, key_type, encrypted_key, last4
-            FROM user_api_keys
-            WHERE user_id = %s
-              AND key_type = %s
-            """,
-            (user_id, key_type),
-        )
-        return await cur.fetchone()
+    stmt = select(
+        UserApiKey.user_id,
+        UserApiKey.key_type,
+        UserApiKey.encrypted_key,
+        UserApiKey.last4,
+    ).where(
+        UserApiKey.user_id == user_id,
+        UserApiKey.key_type == key_type,
+    )
+    row = (await session.execute(stmt)).one_or_none()
+    if row is None:
+        return None
+    return EncryptedApiKeyRow(
+        user_id=row.user_id,
+        key_type=row.key_type,
+        encrypted_key=row.encrypted_key,
+        last4=row.last4,
+    )
 
 
 async def delete_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: str,
 ) -> bool:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            DELETE FROM user_api_keys
-            WHERE user_id = %s
-              AND key_type = %s
-            """,
-            (user_id, key_type),
-        )
-        return cur.rowcount > 0
+    stmt = delete(UserApiKey).where(
+        UserApiKey.user_id == user_id,
+        UserApiKey.key_type == key_type,
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0) > 0
 
 
 async def insert_decrypt_audit(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: str,
     job_id: str | None,
     reason: str,
-) -> AuditEntryRow:
-    async with conn.cursor(row_factory=class_row(AuditEntryRow)) as cur:
-        await cur.execute(
-            """
-            INSERT INTO key_decrypt_audit (user_id, key_type, job_id, reason)
-            VALUES (%s, %s, %s, %s)
-            RETURNING user_id, id, key_type, job_id, reason, created_at
-            """,
-            (user_id, key_type, job_id, reason),
-        )
-        row = await cur.fetchone()
-    assert row is not None
-    return row
+) -> KeyDecryptAudit:
+    stmt = (
+        insert(KeyDecryptAudit)
+        .values(user_id=user_id, key_type=key_type, job_id=job_id, reason=reason)
+        .returning(KeyDecryptAudit)
+    )
+    return (await session.execute(stmt)).scalar_one()
 
 
 async def list_decrypt_audit(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     limit: int = 50,
-) -> list[AuditEntryRow]:
-    async with conn.cursor(row_factory=class_row(AuditEntryRow)) as cur:
-        await cur.execute(
-            """
-            SELECT user_id, id, key_type, job_id, reason, created_at
-            FROM key_decrypt_audit
-            WHERE user_id = %s
-            ORDER BY created_at DESC, id DESC
-            LIMIT %s
-            """,
-            (user_id, limit),
-        )
-        return list(await cur.fetchall())
+) -> list[KeyDecryptAudit]:
+    stmt = (
+        select(KeyDecryptAudit)
+        .where(KeyDecryptAudit.user_id == user_id)
+        .order_by(KeyDecryptAudit.created_at.desc(), KeyDecryptAudit.id.desc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def lock_all_encrypted_keys(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
 ) -> list[EncryptedApiKeyRow]:
     """Lock and return every stored encrypted key for keypair rotation."""
-    async with conn.cursor(row_factory=class_row(EncryptedApiKeyRow)) as cur:
-        await cur.execute(
-            """
-            SELECT user_id, key_type, encrypted_key, last4
-            FROM user_api_keys
-            ORDER BY user_id, key_type
-            FOR UPDATE
-            """
+    stmt = (
+        select(
+            UserApiKey.user_id,
+            UserApiKey.key_type,
+            UserApiKey.encrypted_key,
+            UserApiKey.last4,
         )
-        return list(await cur.fetchall())
+        .order_by(UserApiKey.user_id, UserApiKey.key_type)
+        .with_for_update()
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        EncryptedApiKeyRow(
+            user_id=row.user_id,
+            key_type=row.key_type,
+            encrypted_key=row.encrypted_key,
+            last4=row.last4,
+        )
+        for row in rows
+    ]
 
 
 async def update_encrypted_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: str,
     encrypted_key: bytes,
 ) -> None:
-    await conn.execute(
-        """
-        UPDATE user_api_keys
-        SET encrypted_key = %s,
-            updated_at = now()
-        WHERE user_id = %s
-          AND key_type = %s
-        """,
-        (encrypted_key, user_id, key_type),
+    stmt = (
+        update(UserApiKey)
+        .where(UserApiKey.user_id == user_id, UserApiKey.key_type == key_type)
+        .values(encrypted_key=encrypted_key, updated_at=func.now())
     )
+    await session.execute(stmt)

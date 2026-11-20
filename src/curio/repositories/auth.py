@@ -3,145 +3,108 @@
 from datetime import datetime
 from uuid import UUID
 
-import psycopg
+from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from curio.db.models.users import LoginToken, Session
 
 
 async def create_login_token(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     token_hash: str,
 ) -> None:
-    await conn.execute(
-        """
-        INSERT INTO login_tokens (user_id, token_hash)
-        VALUES (%s, %s)
-        """,
-        (user_id, token_hash),
-    )
+    stmt = insert(LoginToken).values(user_id=user_id, token_hash=token_hash)
+    await session.execute(stmt)
 
 
 async def consume_login_token_lookup(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     token_hash: str,
 ) -> UUID | None:
     """Resolve an active login token hash to its user_id and record last_used_at."""
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            UPDATE login_tokens
-            SET last_used_at = now()
-            WHERE token_hash = %s
-              AND revoked_at IS NULL
-            RETURNING user_id
-            """,
-            (token_hash,),
-        )
-        row = await cur.fetchone()
-    return row[0] if row is not None else None
+    stmt = (
+        update(LoginToken)
+        .where(LoginToken.token_hash == token_hash, LoginToken.revoked_at.is_(None))
+        .values(last_used_at=func.now())
+        .returning(LoginToken.user_id)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def create_session(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     token_hash: str,
     expires_at: datetime,
 ) -> None:
-    await conn.execute(
-        """
-        INSERT INTO sessions (user_id, token_hash, expires_at)
-        VALUES (%s, %s, %s)
-        """,
-        (user_id, token_hash, expires_at),
-    )
+    stmt = insert(Session).values(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
+    await session.execute(stmt)
 
 
 async def find_user_id_by_session_hash(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     token_hash: str,
 ) -> UUID | None:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            SELECT user_id
-            FROM sessions
-            WHERE token_hash = %s
-              AND expires_at > now()
-            """,
-            (token_hash,),
-        )
-        row = await cur.fetchone()
-    return row[0] if row is not None else None
+    stmt = select(Session.user_id).where(
+        Session.token_hash == token_hash,
+        Session.expires_at > func.now(),
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def revoke_login_tokens(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
 ) -> int:
     """Revoke all of the user's unrevoked login tokens. Returns how many were revoked."""
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            UPDATE login_tokens
-            SET revoked_at = now()
-            WHERE user_id = %s
-              AND revoked_at IS NULL
-            """,
-            (user_id,),
-        )
-        return cur.rowcount
+    stmt = (
+        update(LoginToken)
+        .where(LoginToken.user_id == user_id, LoginToken.revoked_at.is_(None))
+        .values(revoked_at=func.now())
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)
 
 
 async def delete_user_sessions(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
 ) -> int:
     """Delete every session of the user. Returns how many were deleted."""
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            DELETE FROM sessions
-            WHERE user_id = %s
-            """,
-            (user_id,),
-        )
-        return cur.rowcount
+    stmt = delete(Session).where(Session.user_id == user_id)
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)
 
 
 async def delete_expired_sessions(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
 ) -> int:
     """Delete the user's sessions that have expired. Returns how many were deleted."""
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            DELETE FROM sessions
-            WHERE user_id = %s
-              AND expires_at <= now()
-            """,
-            (user_id,),
-        )
-        return cur.rowcount
+    stmt = delete(Session).where(
+        Session.user_id == user_id,
+        Session.expires_at <= func.now(),
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)
 
 
 async def delete_session(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     token_hash: str,
 ) -> None:
-    await conn.execute(
-        """
-        DELETE FROM sessions
-        WHERE user_id = %s
-          AND token_hash = %s
-        """,
-        (user_id, token_hash),
+    stmt = delete(Session).where(
+        Session.user_id == user_id,
+        Session.token_hash == token_hash,
     )
+    await session.execute(stmt)

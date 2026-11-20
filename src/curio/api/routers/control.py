@@ -4,13 +4,13 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from psycopg import AsyncConnection
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from curio.api.deps import AppSettings, CurrentUser, DbConn
+from curio.api.deps import AppSettings, CurrentUser, DbSession
 from curio.clients.providers import LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
-from curio.repositories.users import UserRow
+from curio.db.models.users import User
 from curio.services import auth as auth_service
 from curio.services import keys as keys_service
 from curio.services import users as users_service
@@ -45,11 +45,11 @@ def _manifest_url(request: Request, settings: Settings, addon_token: str) -> str
 
 async def _build_settings_response(
     request: Request,
-    conn: AsyncConnection,
+    session: AsyncSession,
     settings: Settings,
-    user: UserRow,
+    user: User,
 ) -> dict[str, Any]:
-    metadata = await keys_service.list_user_key_metadata(conn, user_id=user.id)
+    metadata = await keys_service.list_user_key_metadata(session, user_id=user.id)
     keys_payload: dict[str, dict[str, Any]] = {}
     for kt in KeyType:
         row = metadata.get(kt)
@@ -75,11 +75,11 @@ async def _build_settings_response(
 async def login(
     payload: LoginRequest,
     response: Response,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, Any]:
     result = await auth_service.exchange_login_token(
-        conn,
+        session,
         login_token=payload.token,
         ttl_days=settings.session_ttl_days,
     )
@@ -112,12 +112,12 @@ async def logout(
     request: Request,
     response: Response,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, bool]:
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token:
-        await auth_service.revoke_session(conn, user_id=user.id, session_token=session_token)
+        await auth_service.revoke_session(session, user_id=user.id, session_token=session_token)
     response.delete_cookie(key=settings.session_cookie_name, path="/")
     return {"ok": True}
 
@@ -134,10 +134,10 @@ async def me(user: CurrentUser) -> dict[str, str]:
 async def get_settings_view(
     request: Request,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, Any]:
-    return await _build_settings_response(request, conn, settings, user)
+    return await _build_settings_response(request, session, settings, user)
 
 
 @router.patch("/settings")
@@ -145,12 +145,12 @@ async def update_settings_view(
     payload: UpdateSettingsRequest,
     request: Request,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, Any]:
     try:
         updated = await users_service.update_preferences(
-            conn,
+            session,
             user_id=user.id,
             llm_provider=payload.llm_provider,
             monthly_token_budget=payload.monthly_token_budget,
@@ -161,17 +161,17 @@ async def update_settings_view(
             detail=str(exc),
         ) from exc
 
-    return await _build_settings_response(request, conn, settings, updated)
+    return await _build_settings_response(request, session, settings, updated)
 
 
 @router.post("/settings/addon-token/rotate")
 async def rotate_addon_token(
     request: Request,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, str]:
-    updated = await users_service.rotate_addon_token_for_user(conn, user_id=user.id)
+    updated = await users_service.rotate_addon_token_for_user(session, user_id=user.id)
     return {
         "addon_manifest_url": _manifest_url(request, settings, updated.addon_token),
     }
@@ -196,12 +196,12 @@ async def save_api_key(
     key_type: KeyType,
     payload: ApiKeyRequest,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     settings: AppSettings,
 ) -> dict[str, Any]:
     try:
         row = await keys_service.set_user_api_key(
-            conn,
+            session,
             user_id=user.id,
             key_type=key_type,
             api_key=payload.api_key,
@@ -230,19 +230,19 @@ async def save_api_key(
 async def delete_api_key(
     key_type: KeyType,
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
 ) -> dict[str, bool]:
-    deleted = await keys_service.delete_user_api_key(conn, user_id=user.id, key_type=key_type)
+    deleted = await keys_service.delete_user_api_key(session, user_id=user.id, key_type=key_type)
     return {"deleted": deleted}
 
 
 @router.get("/settings/audit")
 async def get_audit_log(
     user: CurrentUser,
-    conn: DbConn,
+    session: DbSession,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    entries = await keys_service.list_user_audit_entries(conn, user_id=user.id, limit=limit)
+    entries = await keys_service.list_user_audit_entries(session, user_id=user.id, limit=limit)
     return {
         "entries": [
             {

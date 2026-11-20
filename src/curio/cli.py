@@ -7,19 +7,34 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-import psycopg
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from curio.crypto import generate_keypair
+from curio.db.engine import to_sqlalchemy_url
 from curio.services import keys as keys_service
 from curio.services import users as users_service
 from curio.settings import Settings
 
 
+@asynccontextmanager
+async def _open_session(database_url: str) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(to_sqlalchemy_url(database_url), poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+
+
 async def _cmd_users_create(database_url: str, username: str) -> int:
-    async with await psycopg.AsyncConnection.connect(database_url) as conn:
-        provisioned = await users_service.create_user_with_login_token(conn, username=username)
-        await conn.commit()
+    async with _open_session(database_url) as session:
+        provisioned = await users_service.create_user_with_login_token(session, username=username)
+        await session.commit()
 
     print(f"Created user: {provisioned.user.username} ({provisioned.user.id})")
     print(f"Login token (save now, shown once): {provisioned.login_token}")
@@ -28,9 +43,9 @@ async def _cmd_users_create(database_url: str, username: str) -> int:
 
 
 async def _cmd_users_login_token(database_url: str, username: str) -> int:
-    async with await psycopg.AsyncConnection.connect(database_url) as conn:
-        user, login_token = await users_service.issue_login_token(conn, username=username)
-        await conn.commit()
+    async with _open_session(database_url) as session:
+        user, login_token = await users_service.issue_login_token(session, username=username)
+        await session.commit()
 
     print(f"Issued login token for {user.username} ({user.id})")
     print(f"Login token (save now, shown once): {login_token}")
@@ -38,9 +53,9 @@ async def _cmd_users_login_token(database_url: str, username: str) -> int:
 
 
 async def _cmd_users_rotate_addon_token(database_url: str, username: str) -> int:
-    async with await psycopg.AsyncConnection.connect(database_url) as conn:
-        user = await users_service.rotate_addon_token_for_username(conn, username=username)
-        await conn.commit()
+    async with _open_session(database_url) as session:
+        user = await users_service.rotate_addon_token_for_username(session, username=username)
+        await session.commit()
 
     print(f"Rotated addon token for {user.username} ({user.id})")
     print(f"New addon manifest path: /{user.addon_token}/manifest.json")
@@ -48,9 +63,9 @@ async def _cmd_users_rotate_addon_token(database_url: str, username: str) -> int
 
 
 async def _cmd_users_revoke_login_tokens(database_url: str, username: str) -> int:
-    async with await psycopg.AsyncConnection.connect(database_url) as conn:
-        result = await users_service.revoke_login_tokens_for_username(conn, username=username)
-        await conn.commit()
+    async with _open_session(database_url) as session:
+        result = await users_service.revoke_login_tokens_for_username(session, username=username)
+        await session.commit()
     print(f"Revoked login tokens for {result.user.username} ({result.user.id})")
     print(f"Login tokens revoked: {result.login_tokens_revoked}")
     print(f"Sessions deleted: {result.sessions_deleted}")
@@ -62,13 +77,13 @@ async def _cmd_keys_rotate(
     old_private_key: str,
     new_public_key: str,
 ) -> int:
-    async with await psycopg.AsyncConnection.connect(database_url) as conn:
+    async with _open_session(database_url) as session:
         count = await keys_service.rotate_all_keys(
-            conn,
+            session,
             old_private_key=old_private_key,
             new_public_key=new_public_key,
         )
-        await conn.commit()
+        await session.commit()
 
     print(f"Re-encrypted {count} stored API key(s) under the new keypair.")
     return 0
