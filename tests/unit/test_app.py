@@ -1,5 +1,6 @@
 import httpx
 import psycopg
+import pytest
 
 from curio import ADDON_NAME
 from curio.api.app import create_app
@@ -15,6 +16,16 @@ def test_factory_builds_independent_apps_without_opening_a_pool():
     assert a.title == ADDON_NAME
     # The pool is created in the lifespan, not at construction or import time.
     assert not hasattr(a.state, "pool")
+
+
+def test_factory_refuses_to_build_with_the_private_key():
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql://unused@127.0.0.1:1/unused",
+        key_private_key="some-private-key",
+    )
+    with pytest.raises(RuntimeError, match="KEY_PRIVATE_KEY"):
+        create_app(settings)
 
 
 async def test_dependency_override_replaces_db_connection():

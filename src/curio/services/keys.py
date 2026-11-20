@@ -3,13 +3,16 @@
 Follows ADR 0002:
 - API processes encrypt with KEY_PUBLIC_KEY only; plaintext is tested, encrypted, and discarded.
 - Workers decrypt just-in-time via `get_llm_key` / `get_tmdb_key` (backed by `get_user_api_key`),
-  recording an audit row on every decryption.
+  recording an audit row on every decryption. The audit row is committed on its own connection
+  from `audit_pool`, before the plaintext is returned, so it survives a rollback of the caller's
+  job transaction.
 """
 
 from dataclasses import dataclass
 from uuid import UUID
 
 import psycopg
+from psycopg_pool import AsyncConnectionPool
 
 from curio.clients.providers import (
     LLM_PROVIDERS,
@@ -91,13 +94,19 @@ async def delete_user_api_key(
 async def get_user_api_key(
     conn: psycopg.AsyncConnection,
     *,
+    audit_pool: AsyncConnectionPool,
     user_id: UUID,
     key_type: KeyType,
     job_id: str | None,
     reason: str,
     private_key: str | None,
 ) -> str:
-    """Single worker key-access function: decrypts just-in-time and writes an audit row."""
+    """Single worker key-access function: decrypts just-in-time and writes an audit row.
+
+    The key is read on `conn`, but the audit row is committed in its own transaction on a
+    connection from `audit_pool`, so a later rollback of `conn` cannot erase the record of the
+    decryption. If the audit write fails the error propagates and the plaintext is not returned.
+    """
     decryptor = KeyDecryptor(private_key)
     row = await keys_repo.get_encrypted_api_key(
         conn,
@@ -108,19 +117,21 @@ async def get_user_api_key(
         raise KeyNotFoundError(f"no {key_type.value} key configured for user {user_id}")
 
     plaintext = decryptor.decrypt(row.encrypted_key)
-    await keys_repo.insert_decrypt_audit(
-        conn,
-        user_id=user_id,
-        key_type=key_type.value,
-        job_id=job_id,
-        reason=reason,
-    )
+    async with audit_pool.connection() as audit_conn, audit_conn.transaction():
+        await keys_repo.insert_decrypt_audit(
+            audit_conn,
+            user_id=user_id,
+            key_type=key_type.value,
+            job_id=job_id,
+            reason=reason,
+        )
     return plaintext
 
 
 async def get_tmdb_key(
     conn: psycopg.AsyncConnection,
     *,
+    audit_pool: AsyncConnectionPool,
     user_id: UUID,
     job_id: str | None,
     reason: str,
@@ -129,6 +140,7 @@ async def get_tmdb_key(
     """Decrypt the user's TMDB key for a worker job and log the access."""
     return await get_user_api_key(
         conn,
+        audit_pool=audit_pool,
         user_id=user_id,
         key_type=KeyType.TMDB,
         job_id=job_id,
@@ -140,6 +152,7 @@ async def get_tmdb_key(
 async def get_llm_key(
     conn: psycopg.AsyncConnection,
     *,
+    audit_pool: AsyncConnectionPool,
     user_id: UUID,
     job_id: str | None,
     reason: str,
@@ -157,6 +170,7 @@ async def get_llm_key(
 
     plaintext = await get_user_api_key(
         conn,
+        audit_pool=audit_pool,
         user_id=user_id,
         key_type=provider,
         job_id=job_id,
@@ -181,7 +195,11 @@ async def rotate_all_keys(
     old_private_key: str,
     new_public_key: str,
 ) -> int:
-    """Re-encrypt every stored user API key under a new public key inside one transaction."""
+    """Re-encrypt every stored user API key under a new public key inside one transaction.
+
+    Each decryption is audited (reason `rotation`, no job) in the same transaction, so the audit
+    rows commit or roll back together with the re-encryption.
+    """
     decryptor = KeyDecryptor(old_private_key)
     encryptor = KeyEncryptor(new_public_key)
 
@@ -195,5 +213,12 @@ async def rotate_all_keys(
                 user_id=row.user_id,
                 key_type=row.key_type,
                 encrypted_key=new_ciphertext,
+            )
+            await keys_repo.insert_decrypt_audit(
+                conn,
+                user_id=row.user_id,
+                key_type=row.key_type,
+                job_id=None,
+                reason="rotation",
             )
     return len(rows)

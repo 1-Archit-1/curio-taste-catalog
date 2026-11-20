@@ -107,6 +107,37 @@ async def rotate_addon_token_for_user(
     return updated
 
 
+@dataclass(frozen=True)
+class LoginTokenRevocation:
+    user: UserRow
+    login_tokens_revoked: int
+    sessions_deleted: int
+
+
+async def revoke_login_tokens_for_username(
+    conn: psycopg.AsyncConnection,
+    *,
+    username: str,
+) -> LoginTokenRevocation:
+    user = await users_repo.get_user_by_username(conn, username=username.strip())
+    if user is None:
+        raise UserNotFoundError(f"user '{username}' not found")
+    async with conn.transaction():
+        tokens, sessions = await revoke_login_tokens_for_user(conn, user_id=user.id)
+    return LoginTokenRevocation(user=user, login_tokens_revoked=tokens, sessions_deleted=sessions)
+
+
+async def revoke_login_tokens_for_user(
+    conn: psycopg.AsyncConnection,
+    *,
+    user_id: UUID,
+) -> tuple[int, int]:
+    """Revoke the user's login tokens and delete their sessions. Returns (tokens, sessions)."""
+    tokens = await auth_repo.revoke_login_tokens(conn, user_id=user_id)
+    sessions = await auth_repo.delete_user_sessions(conn, user_id=user_id)
+    return tokens, sessions
+
+
 async def resolve_user_by_addon_token(
     conn: psycopg.AsyncConnection,
     *,

@@ -17,6 +17,13 @@ log = logging.getLogger(__name__)
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the API app. Run with `uvicorn --factory curio.api.app:create_app`."""
     settings = settings or Settings()
+    if settings.key_private_key:
+        # ADR 0002: only worker processes may hold the private key. Settings also reads `.env`,
+        # so a local run could otherwise pick it up silently.
+        raise RuntimeError(
+            "KEY_PRIVATE_KEY is set, but the API must never hold the private key (ADR 0002). "
+            "Unset it in the API's environment and remove it from the .env the API reads."
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -319,7 +319,7 @@
         div.dataset.keyType = p.id;
 
         const badge = info.configured
-          ? `<span class="badge ok">••••${info.last4 || ""}</span>`
+          ? `<span class="badge ok">••••<span class="last4"></span></span>`
           : `<span class="badge">Not set</span>`;
         const updated = info.updated_at ? `Updated ${new Date(info.updated_at).toISOString().slice(0, 19).replace("T", " ")}Z` : "";
 
@@ -337,6 +337,9 @@
           <div class="status key-status"></div>
         `;
 
+        // last4 comes from the server: set it as text, never as HTML.
+        const last4El = div.querySelector(".last4");
+        if (last4El) last4El.textContent = info.last4 || "";
         const input = div.querySelector(".key-input");
         const statusEl = div.querySelector(".key-status");
 

@@ -47,6 +47,16 @@ async def _cmd_users_rotate_addon_token(database_url: str, username: str) -> int
     return 0
 
 
+async def _cmd_users_revoke_login_tokens(database_url: str, username: str) -> int:
+    async with await psycopg.AsyncConnection.connect(database_url) as conn:
+        result = await users_service.revoke_login_tokens_for_username(conn, username=username)
+        await conn.commit()
+    print(f"Revoked login tokens for {result.user.username} ({result.user.id})")
+    print(f"Login tokens revoked: {result.login_tokens_revoked}")
+    print(f"Sessions deleted: {result.sessions_deleted}")
+    return 0
+
+
 async def _cmd_keys_rotate(
     database_url: str,
     old_private_key: str,
@@ -95,6 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rotate_addon.add_argument("username", help="Existing username")
 
+    p_revoke = users_sub.add_parser(
+        "revoke-login-tokens",
+        help="Revoke all of a user's login tokens and delete all of their sessions",
+    )
+    p_revoke.add_argument("username", help="Existing username")
+
     keys_parser = sub.add_parser("keys", help="Manage encryption keys")
     keys_sub = keys_parser.add_subparsers(dest="keys_command", required=True)
 
@@ -134,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.users_command == "rotate-addon-token":
                 return asyncio.run(
                     _cmd_users_rotate_addon_token(settings.database_url, args.username)
+                )
+            if args.users_command == "revoke-login-tokens":
+                return asyncio.run(
+                    _cmd_users_revoke_login_tokens(settings.database_url, args.username)
                 )
         elif args.command == "keys" and args.keys_command == "rotate":
             if not args.old_private_key or not args.new_public_key:

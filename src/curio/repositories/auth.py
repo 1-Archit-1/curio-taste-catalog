@@ -77,6 +77,60 @@ async def find_user_id_by_session_hash(
     return row[0] if row is not None else None
 
 
+async def revoke_login_tokens(
+    conn: psycopg.AsyncConnection,
+    *,
+    user_id: UUID,
+) -> int:
+    """Revoke all of the user's unrevoked login tokens. Returns how many were revoked."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE login_tokens
+            SET revoked_at = now()
+            WHERE user_id = %s
+              AND revoked_at IS NULL
+            """,
+            (user_id,),
+        )
+        return cur.rowcount
+
+
+async def delete_user_sessions(
+    conn: psycopg.AsyncConnection,
+    *,
+    user_id: UUID,
+) -> int:
+    """Delete every session of the user. Returns how many were deleted."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            DELETE FROM sessions
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        return cur.rowcount
+
+
+async def delete_expired_sessions(
+    conn: psycopg.AsyncConnection,
+    *,
+    user_id: UUID,
+) -> int:
+    """Delete the user's sessions that have expired. Returns how many were deleted."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            DELETE FROM sessions
+            WHERE user_id = %s
+              AND expires_at <= now()
+            """,
+            (user_id,),
+        )
+        return cur.rowcount
+
+
 async def delete_session(
     conn: psycopg.AsyncConnection,
     *,

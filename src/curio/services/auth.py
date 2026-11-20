@@ -33,6 +33,8 @@ async def exchange_login_token(
     if user is None:
         return None
 
+    # Nothing else removes expired rows, so prune this user's on each login.
+    await auth_repo.delete_expired_sessions(conn, user_id=user.id)
     session_token = generate_secret_token(32)
     expires_at = datetime.now(UTC) + timedelta(days=ttl_days)
     await auth_repo.create_session(
