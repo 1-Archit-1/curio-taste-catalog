@@ -3,19 +3,25 @@
 Uses TEST_DATABASE_URL if set (CI, or a local Postgres you started); otherwise
 starts a throwaway pgvector container via testcontainers. Migrations run once
 per session. Each test gets a connection inside a transaction that is rolled
-back afterwards, so tests never see each other's writes.
+back afterwards, so tests never see each other's writes. Tests that exercise code writing on
+a second connection (the decrypt audit) use `audit_pool` and `make_committed_user`, because
+rows created inside the rolled-back `conn` transaction are invisible to other connections.
 """
 
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
 import httpx
 import psycopg
 import pytest
+from psycopg_pool import AsyncConnectionPool
 
 from curio.api.app import create_app
 from curio.api.deps import get_conn
+from curio.crypto import Keypair, generate_keypair
 from curio.db.migrate import migrate
+from curio.services import users as users_service
+from curio.services.users import ProvisionedUser
 from curio.settings import Settings
 
 PGVECTOR_IMAGE = "pgvector/pgvector:pg16"
@@ -49,14 +55,63 @@ async def conn(migrated_database_url: str) -> AsyncIterator[psycopg.AsyncConnect
 
 
 @pytest.fixture
+async def audit_pool(migrated_database_url: str) -> AsyncIterator[AsyncConnectionPool]:
+    """Pool for the separate-connection decrypt audit write (what a worker would pass in)."""
+    async with AsyncConnectionPool(migrated_database_url, min_size=1, max_size=2) as pool:
+        yield pool
+
+
+@pytest.fixture
+async def make_committed_user(
+    conn: psycopg.AsyncConnection,
+    migrated_database_url: str,
+) -> AsyncIterator[Callable[[str], Awaitable[ProvisionedUser]]]:
+    """Create users that are committed, so other connections can reference them.
+
+    On teardown, rolls back `conn` (releasing its locks) and deletes the users; the delete
+    cascades to their tokens, sessions, keys, and audit rows.
+    """
+    usernames: list[str] = []
+
+    async def make(username: str) -> ProvisionedUser:
+        async with await psycopg.AsyncConnection.connect(migrated_database_url) as setup_conn:
+            provisioned = await users_service.create_user_with_login_token(
+                setup_conn, username=username
+            )
+        usernames.append(username)
+        return provisioned
+
+    yield make
+
+    await conn.rollback()
+    async with await psycopg.AsyncConnection.connect(migrated_database_url) as cleanup_conn:
+        await cleanup_conn.execute("DELETE FROM users WHERE username = ANY(%s)", (usernames,))
+
+
+@pytest.fixture(scope="session")
+def keypair() -> Keypair:
+    return generate_keypair()
+
+
+@pytest.fixture
 async def client(
-    conn: psycopg.AsyncConnection, migrated_database_url: str
+    conn: psycopg.AsyncConnection,
+    migrated_database_url: str,
+    keypair: Keypair,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """API client whose routes share the test's rolled-back connection.
 
+    Configured with KEY_PUBLIC_KEY only (no KEY_PRIVATE_KEY), matching ADR 0002.
     The app lifespan is not run, so no pool is opened.
     """
-    app = create_app(Settings(_env_file=None, database_url=migrated_database_url))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            database_url=migrated_database_url,
+            key_public_key=keypair.public_key,
+            key_private_key=None,
+        )
+    )
 
     async def test_conn() -> AsyncIterator[psycopg.AsyncConnection]:
         yield conn

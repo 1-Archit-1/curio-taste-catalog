@@ -12,7 +12,7 @@ Any design that lets the server use a key unattended also lets whoever operates 
 
 ## Decision
 
-Each user supplies their own TMDB and Gemini API keys. Keys are stored, encrypted, and used by workers for background runs.
+Each user supplies their own TMDB key and LLM API key (supporting Gemini, OpenAI, Anthropic, and OpenRouter). Keys are stored, encrypted, and used by workers for background runs.
 
 1. **Public-key encryption split by process.** Keys are encrypted with a sealed box (libsodium via PyNaCl). API processes hold only the public key, so they can encrypt and store a key but never read one. Only worker processes hold the private key. A database leak or a compromised API process exposes ciphertext only.
 2. **Test before storing.** When a user submits a key, the API makes one test call to the provider, encrypts the key, stores it, and discards the plaintext. The last 4 characters are stored separately for masked display. The API never returns a key.
