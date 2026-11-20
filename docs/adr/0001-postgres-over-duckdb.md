@@ -8,7 +8,7 @@ The prototype stored everything in DuckDB. DuckDB allows only one process to ope
 
 ## Decision
 
-Use Postgres 16 with the pgvector extension as the only datastore. Access it asynchronously with psycopg 3 and `psycopg_pool.AsyncConnectionPool`, using raw SQL in repositories and no ORM.
+Use Postgres 16 with the pgvector extension as the only datastore. Access it asynchronously with psycopg 3 and `psycopg_pool.AsyncConnectionPool`, using raw SQL in repositories and no ORM. (The data-access part is superseded by [ADR 0005](0005-sqlalchemy-and-alembic.md): SQLAlchemy 2.0 and Alembic on the same psycopg 3 driver.)
 
 ## Consequences
 
