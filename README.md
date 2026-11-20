@@ -22,12 +22,18 @@ Process counts come from `.env`: `API_WORKERS` (uvicorn workers in the api conta
 
 ### Migrations
 
-Migrations are numbered SQL files in `src/curio/db/migrations/`. The `migrate` service applies them before api and worker start. To run them by hand (safe to repeat):
+Schema migrations use Alembic (`src/curio/db/alembic.ini` and `src/curio/db/alembic/versions/`). The `migrate` service runs `alembic -c src/curio/db/alembic.ini upgrade head` before api and worker start. To run them by hand (safe to repeat):
 
 ```sh
 docker compose run --rm migrate
 # or from the host, against the compose Postgres:
-DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run python -m curio.db.migrate
+DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run alembic -c src/curio/db/alembic.ini upgrade head
+```
+
+If you have an existing database created by the earlier SQL migration runner (`0001` + `0002`), stamp it once so Alembic knows it is already at the initial revision:
+
+```sh
+DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run alembic -c src/curio/db/alembic.ini stamp head
 ```
 
 ### Running locally without containers for the app
@@ -35,7 +41,7 @@ DATABASE_URL=postgresql://curio:curio@localhost:5432/curio uv run python -m curi
 ```sh
 docker compose up -d postgres
 export DATABASE_URL=postgresql://curio:curio@localhost:5432/curio  # or set it in .env
-uv run python -m curio.db.migrate
+uv run alembic -c src/curio/db/alembic.ini upgrade head
 uv run uvicorn --factory curio.api.app:create_app --reload
 uv run python -m curio.worker
 ```

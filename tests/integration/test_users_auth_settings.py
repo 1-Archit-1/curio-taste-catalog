@@ -6,10 +6,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import psycopg
 import pytest
-from psycopg_pool import AsyncConnectionPool
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from curio.api.app import create_app
-from curio.api.deps import get_conn
+from curio.api.deps import get_session
 from curio.cli import main as cli_main
 from curio.clients.providers import KeyType
 from curio.crypto import (
@@ -18,6 +19,7 @@ from curio.crypto import (
     PrivateKeyNotConfiguredError,
     generate_keypair,
 )
+from curio.db.models.users import Session
 from curio.repositories import auth as auth_repo
 from curio.repositories import keys as keys_repo
 from curio.services import auth as auth_service
@@ -44,12 +46,12 @@ def _mock_all_providers_ok(respx_mock) -> None:
     )
 
 
-async def _make_client_for_conn(
-    conn: psycopg.AsyncConnection,
+async def _make_client_for_session(
+    session: AsyncSession,
     database_url: str,
     keypair: Keypair,
 ) -> httpx.AsyncClient:
-    """Create a fresh AsyncClient with its own cookie jar sharing `conn`."""
+    """Create a fresh AsyncClient with its own cookie jar sharing `session`."""
     app = create_app(
         Settings(
             _env_file=None,
@@ -59,10 +61,10 @@ async def _make_client_for_conn(
         )
     )
 
-    async def test_conn():
-        yield conn
+    async def test_session():
+        yield session
 
-    app.dependency_overrides[get_conn] = test_conn
+    app.dependency_overrides[get_session] = test_session
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
@@ -85,10 +87,10 @@ async def test_control_plane_rejects_unauthenticated_requests(client: httpx.Asyn
 
 
 async def test_login_session_lifecycle(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     client: httpx.AsyncClient,
 ):
-    provisioned = await users_service.create_user_with_login_token(conn, username="alice")
+    provisioned = await users_service.create_user_with_login_token(session, username="alice")
 
     # Wrong token is rejected.
     bad = await client.post("/api/auth/login", json={"token": "not-a-valid-token"})
@@ -124,9 +126,9 @@ async def test_settings_tab_html_contains_notice_and_all_providers(client: httpx
 
 
 async def test_keys_test_encrypt_store_no_leak_and_process_split(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     client: httpx.AsyncClient,
-    audit_pool: AsyncConnectionPool,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     make_committed_user,
     keypair: Keypair,
     respx_mock,
@@ -194,7 +196,7 @@ async def test_keys_test_encrypt_store_no_leak_and_process_split(
     # Database holds ciphertext only, never plaintext.
     for key_type, secret in secrets_by_type.items():
         row = await keys_repo.get_encrypted_api_key(
-            conn,
+            session,
             user_id=provisioned.user.id,
             key_type=key_type,
         )
@@ -210,8 +212,8 @@ async def test_keys_test_encrypt_store_no_leak_and_process_split(
     )
     with pytest.raises(PrivateKeyNotConfiguredError):
         await keys_service.get_llm_key(
-            conn,
-            audit_pool=audit_pool,
+            session,
+            audit_session_factory=audit_session_factory,
             user_id=provisioned.user.id,
             job_id="job-1",
             reason="catalog generation",
@@ -220,8 +222,8 @@ async def test_keys_test_encrypt_store_no_leak_and_process_split(
 
     # Worker (with KEY_PRIVATE_KEY) decrypts TMDB and each LLM provider and writes audit entries.
     tmdb_plain = await keys_service.get_tmdb_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=provisioned.user.id,
         job_id="job-100",
         reason="enrich candidates",
@@ -238,8 +240,8 @@ async def test_keys_test_encrypt_store_no_leak_and_process_split(
         assert patch_resp.json()["llm_provider"] == provider.value
 
         resolved = await keys_service.get_llm_key(
-            conn,
-            audit_pool=audit_pool,
+            session,
+            audit_session_factory=audit_session_factory,
             user_id=provisioned.user.id,
             job_id=f"job-{provider.value}",
             reason=f"run with {provider.value}",
@@ -264,8 +266,8 @@ async def test_keys_test_encrypt_store_no_leak_and_process_split(
 
 
 async def test_keypair_rotation_reencrypts_all_stored_keys(
-    conn: psycopg.AsyncConnection,
-    audit_pool: AsyncConnectionPool,
+    session: AsyncSession,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     make_committed_user,
     keypair: Keypair,
     respx_mock,
@@ -275,14 +277,14 @@ async def test_keypair_rotation_reencrypts_all_stored_keys(
     u2 = await make_committed_user("rot2")
 
     await keys_service.set_user_api_key(
-        conn,
+        session,
         user_id=u1.user.id,
         key_type=KeyType.GEMINI,
         api_key="AIza-rot-user1-key",
         public_key=keypair.public_key,
     )
     await keys_service.set_user_api_key(
-        conn,
+        session,
         user_id=u2.user.id,
         key_type=KeyType.OPENROUTER,
         api_key="sk-or-rot-user2-key",
@@ -291,21 +293,21 @@ async def test_keypair_rotation_reencrypts_all_stored_keys(
 
     new_kp = generate_keypair()
     rotated_count = await keys_service.rotate_all_keys(
-        conn,
+        session,
         old_private_key=keypair.private_key,
         new_public_key=new_kp.public_key,
     )
     assert rotated_count == 2
     # Every decryption during rotation is audited: one row per key, reason `rotation`, no job.
     for user, key_type in ((u1.user, "gemini"), (u2.user, "openrouter")):
-        entries = await keys_service.list_user_audit_entries(conn, user_id=user.id)
+        entries = await keys_service.list_user_audit_entries(session, user_id=user.id)
         assert [(e.key_type, e.reason, e.job_id) for e in entries] == [(key_type, "rotation", None)]
 
     # Old private key can no longer decrypt.
     with pytest.raises(KeyDecryptionError):
         await keys_service.get_user_api_key(
-            conn,
-            audit_pool=audit_pool,
+            session,
+            audit_session_factory=audit_session_factory,
             user_id=u1.user.id,
             key_type=KeyType.GEMINI,
             job_id="job-old",
@@ -315,8 +317,8 @@ async def test_keypair_rotation_reencrypts_all_stored_keys(
 
     # New private key decrypts every rotated key cleanly.
     plain1 = await keys_service.get_user_api_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=u1.user.id,
         key_type=KeyType.GEMINI,
         job_id="job-new-1",
@@ -324,8 +326,8 @@ async def test_keypair_rotation_reencrypts_all_stored_keys(
         private_key=new_kp.private_key,
     )
     plain2 = await keys_service.get_user_api_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=u2.user.id,
         key_type=KeyType.OPENROUTER,
         job_id="job-new-2",
@@ -337,8 +339,8 @@ async def test_keypair_rotation_reencrypts_all_stored_keys(
 
 
 async def test_decrypt_audit_survives_caller_rollback(
-    conn: psycopg.AsyncConnection,
-    audit_pool: AsyncConnectionPool,
+    session: AsyncSession,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     make_committed_user,
     keypair: Keypair,
     respx_mock,
@@ -346,7 +348,7 @@ async def test_decrypt_audit_survives_caller_rollback(
     _mock_all_providers_ok(respx_mock)
     user = (await make_committed_user("audit_rollback")).user
     await keys_service.set_user_api_key(
-        conn,
+        session,
         user_id=user.id,
         key_type=KeyType.TMDB,
         api_key="tmdb-rollback-key",
@@ -354,8 +356,8 @@ async def test_decrypt_audit_survives_caller_rollback(
     )
 
     plaintext = await keys_service.get_user_api_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=user.id,
         key_type=KeyType.TMDB,
         job_id="job-rolled-back",
@@ -365,11 +367,11 @@ async def test_decrypt_audit_survives_caller_rollback(
     assert plaintext == "tmdb-rollback-key"
 
     # The job's transaction rolls back (the stored key written above disappears with it) ...
-    await conn.rollback()
-    assert await keys_repo.get_encrypted_api_key(conn, user_id=user.id, key_type="tmdb") is None
+    await session.rollback()
+    assert await keys_repo.get_encrypted_api_key(session, user_id=user.id, key_type="tmdb") is None
 
-    # ... but the audit row was committed on its own connection and is still there.
-    async with audit_pool.connection() as other:
+    # ... but the audit row was committed on its own session and is still there.
+    async with audit_session_factory() as other:
         entries = await keys_repo.list_decrypt_audit(other, user_id=user.id)
     assert [(e.key_type, e.job_id, e.reason) for e in entries] == [
         ("tmdb", "job-rolled-back", "job that fails later")
@@ -377,18 +379,24 @@ async def test_decrypt_audit_survives_caller_rollback(
 
 
 async def test_plaintext_not_returned_when_audit_write_fails(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     keypair: Keypair,
     respx_mock,
 ):
-    class UnavailablePool:
-        def connection(self):
+    class UnavailableSessionFactory:
+        def __call__(self):
+            return self
+
+        async def __aenter__(self):
             raise psycopg.OperationalError("audit database down")
 
+        async def __aexit__(self, *args):
+            return False
+
     _mock_all_providers_ok(respx_mock)
-    provisioned = await users_service.create_user_with_login_token(conn, username="audit_fail")
+    provisioned = await users_service.create_user_with_login_token(session, username="audit_fail")
     await keys_service.set_user_api_key(
-        conn,
+        session,
         user_id=provisioned.user.id,
         key_type=KeyType.TMDB,
         api_key="tmdb-audit-fail-key",
@@ -397,8 +405,8 @@ async def test_plaintext_not_returned_when_audit_write_fails(
 
     with pytest.raises(psycopg.OperationalError):
         await keys_service.get_user_api_key(
-            conn,
-            audit_pool=UnavailablePool(),  # type: ignore[arg-type]
+            session,
+            audit_session_factory=UnavailableSessionFactory(),  # type: ignore[arg-type]
             user_id=provisioned.user.id,
             key_type=KeyType.TMDB,
             job_id="job-x",
@@ -408,16 +416,18 @@ async def test_plaintext_not_returned_when_audit_write_fails(
 
 
 async def test_revoke_login_tokens_blocks_login_and_ends_sessions(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     client: httpx.AsyncClient,
     migrated_database_url: str,
     keypair: Keypair,
 ):
-    alice = await users_service.create_user_with_login_token(conn, username="rev_alice")
-    bob = await users_service.create_user_with_login_token(conn, username="rev_bob")
-    _, alice_second_token = await users_service.issue_login_token(conn, username="rev_alice")
+    alice = await users_service.create_user_with_login_token(session, username="rev_alice")
+    bob = await users_service.create_user_with_login_token(session, username="rev_bob")
+    _, alice_second_token = await users_service.issue_login_token(session, username="rev_alice")
 
-    async with await _make_client_for_conn(conn, migrated_database_url, keypair) as bob_client:
+    async with await _make_client_for_session(
+        session, migrated_database_url, keypair
+    ) as bob_client:
         assert (
             await client.post("/api/auth/login", json={"token": alice.login_token})
         ).status_code == 200
@@ -426,7 +436,7 @@ async def test_revoke_login_tokens_blocks_login_and_ends_sessions(
         ).status_code == 200
         assert (await client.get("/api/auth/me")).status_code == 200
 
-        result = await users_service.revoke_login_tokens_for_username(conn, username="rev_alice")
+        result = await users_service.revoke_login_tokens_for_username(session, username="rev_alice")
         assert result.login_tokens_revoked == 2
         assert result.sessions_deleted == 1
 
@@ -443,11 +453,11 @@ async def test_revoke_login_tokens_blocks_login_and_ends_sessions(
         ).status_code == 200
 
     # Revoking again finds nothing left to revoke.
-    again = await users_service.revoke_login_tokens_for_username(conn, username="rev_alice")
+    again = await users_service.revoke_login_tokens_for_username(session, username="rev_alice")
     assert (again.login_tokens_revoked, again.sessions_deleted) == (0, 0)
 
     with pytest.raises(users_service.UserNotFoundError):
-        await users_service.revoke_login_tokens_for_username(conn, username="rev_nobody")
+        await users_service.revoke_login_tokens_for_username(session, username="rev_nobody")
 
 
 def test_cli_revoke_login_tokens(
@@ -473,9 +483,9 @@ def test_cli_revoke_login_tokens(
             cleanup.execute("DELETE FROM users WHERE username = %s", (username,))
 
 
-async def test_login_deletes_only_that_users_expired_sessions(conn: psycopg.AsyncConnection):
-    alice = await users_service.create_user_with_login_token(conn, username="exp_alice")
-    bob = await users_service.create_user_with_login_token(conn, username="exp_bob")
+async def test_login_deletes_only_that_users_expired_sessions(session: AsyncSession):
+    alice = await users_service.create_user_with_login_token(session, username="exp_alice")
+    bob = await users_service.create_user_with_login_token(session, username="exp_bob")
     now = datetime.now(UTC)
     for user, label, delta in (
         (alice.user, "alice-expired", timedelta(seconds=-1)),
@@ -483,17 +493,19 @@ async def test_login_deletes_only_that_users_expired_sessions(conn: psycopg.Asyn
         (bob.user, "bob-expired", timedelta(seconds=-1)),
     ):
         await auth_repo.create_session(
-            conn, user_id=user.id, token_hash=label, expires_at=now + delta
+            session, user_id=user.id, token_hash=label, expires_at=now + delta
         )
 
     exchanged = await auth_service.exchange_login_token(
-        conn, login_token=alice.login_token, ttl_days=30
+        session, login_token=alice.login_token, ttl_days=30
     )
     assert exchanged is not None
 
     async def session_hashes(user_id) -> set[str]:
-        cur = await conn.execute("SELECT token_hash FROM sessions WHERE user_id = %s", (user_id,))
-        return {row[0] for row in await cur.fetchall()}
+        rows = (
+            await session.execute(select(Session.token_hash).where(Session.user_id == user_id))
+        ).scalars()
+        return set(rows.all())
 
     alice_hashes = await session_hashes(alice.user.id)
     assert "alice-expired" not in alice_hashes
@@ -509,8 +521,8 @@ async def test_ui_does_not_interpolate_last4_into_html(client: httpx.AsyncClient
 
 
 async def test_multi_user_isolation(
-    conn: psycopg.AsyncConnection,
-    audit_pool: AsyncConnectionPool,
+    session: AsyncSession,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     make_committed_user,
     migrated_database_url: str,
     keypair: Keypair,
@@ -521,8 +533,8 @@ async def test_multi_user_isolation(
     bob = await make_committed_user("iso_bob")
 
     async with (
-        await _make_client_for_conn(conn, migrated_database_url, keypair) as alice_client,
-        await _make_client_for_conn(conn, migrated_database_url, keypair) as bob_client,
+        await _make_client_for_session(session, migrated_database_url, keypair) as alice_client,
+        await _make_client_for_session(session, migrated_database_url, keypair) as bob_client,
     ):
         assert (
             await alice_client.post("/api/auth/login", json={"token": alice.login_token})
@@ -546,16 +558,16 @@ async def test_multi_user_isolation(
 
         # Worker decrypts for both users.
         await keys_service.get_llm_key(
-            conn,
-            audit_pool=audit_pool,
+            session,
+            audit_session_factory=audit_session_factory,
             user_id=alice.user.id,
             job_id="alice-job",
             reason="alice run",
             private_key=keypair.private_key,
         )
         await keys_service.get_llm_key(
-            conn,
-            audit_pool=audit_pool,
+            session,
+            audit_session_factory=audit_session_factory,
             user_id=bob.user.id,
             job_id="bob-job",
             reason="bob run",
@@ -592,10 +604,10 @@ async def test_multi_user_isolation(
 
 
 async def test_cors_star_present_on_addon_routes_only(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     client: httpx.AsyncClient,
 ):
-    provisioned = await users_service.create_user_with_login_token(conn, username="cors_user")
+    provisioned = await users_service.create_user_with_login_token(session, username="cors_user")
     origin = {"Origin": "https://app.strem.io"}
 
     # Addon GET (valid token) has CORS `*`.

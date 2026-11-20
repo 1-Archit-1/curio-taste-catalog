@@ -32,7 +32,7 @@ services:
 
   migrate:
     <<: *app
-    command: ["python", "-m", "curio.db.migrate"]
+    command: ["alembic", "-c", "src/curio/db/alembic.ini", "upgrade", "head"]
     restart: "no"
     depends_on:
       postgres:

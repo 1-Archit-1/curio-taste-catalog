@@ -1,12 +1,16 @@
+import os
+import subprocess
+import sys
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
-from psycopg.conninfo import make_conninfo
+from alembic import command
+from sqlalchemy.engine import make_url
 
-from curio.db.migrate import discover, migrate
+from tests.integration.conftest import ALEMBIC_INI, make_alembic_config
 
 
 @pytest.fixture
@@ -16,42 +20,41 @@ def empty_database_url(database_url: str) -> Iterator[str]:
     with psycopg.connect(database_url, autocommit=True) as admin:
         admin.execute(f'CREATE DATABASE "{name}"')
     try:
-        yield make_conninfo(database_url, dbname=name)
+        yield make_url(database_url).set(database=name).render_as_string(hide_password=False)
     finally:
         with psycopg.connect(database_url, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
 
 
 def test_migrations_apply_to_empty_database_and_are_idempotent(empty_database_url):
-    expected = [m.version for m in discover()]
+    cfg = make_alembic_config(empty_database_url)
 
-    assert migrate(empty_database_url) == expected
-    assert migrate(empty_database_url) == []
+    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "head")
+    command.check(cfg)
 
     with psycopg.connect(empty_database_url) as conn:
-        versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations ORDER BY 1")]
+        versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
         has_vector = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
-    assert versions == expected
+    assert versions == ["0001"]
     assert has_vector is not None
 
 
-def test_failed_migration_rolls_back(empty_database_url, tmp_path):
-    (tmp_path / "0001_ok.sql").write_text("CREATE TABLE ok_table (id int);")
-    (tmp_path / "0002_broken.sql").write_text("CREATE TABLE half (id int); SELECT nope;")
+def test_concurrent_runs_apply_each_migration_once(empty_database_url):
+    env = {**os.environ, "DATABASE_URL": empty_database_url}
 
-    with pytest.raises(psycopg.errors.UndefinedColumn):
-        migrate(empty_database_url, tmp_path)
+    def run_upgrade(_: int) -> None:
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI), "upgrade", "head"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(run_upgrade, range(4)))
 
     with psycopg.connect(empty_database_url) as conn:
-        versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
-        half = conn.execute("SELECT to_regclass('half')").fetchone()[0]
-    assert versions == [1]
-    assert half is None
-
-
-def test_concurrent_runs_apply_each_migration_once(empty_database_url):
-    expected = [m.version for m in discover()]
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(lambda _: migrate(empty_database_url), range(4)))
-    # Exactly one run applies everything; the others wait on the lock and find nothing to do.
-    assert sorted(results) == [[], [], [], expected]
+        versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
+    assert versions == ["0001"]

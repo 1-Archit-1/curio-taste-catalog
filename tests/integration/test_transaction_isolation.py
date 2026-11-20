@@ -1,16 +1,25 @@
-"""The `conn` fixture's writes stay inside an uncommitted transaction.
+"""The `session` fixture's writes stay inside an uncommitted outer transaction.
 
-Another connection can't see them, so the fixture's rollback at teardown
+Another session can't see them, so the fixture's rollback at teardown
 leaves nothing behind. Doesn't depend on test order.
 """
 
-import psycopg
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from curio.repositories import users as users_repo
 
 
-async def test_fixture_writes_are_not_committed(conn, migrated_database_url):
-    await conn.execute("CREATE TABLE rollback_probe (id int)")
-    await conn.execute("INSERT INTO rollback_probe VALUES (1)")
+async def test_fixture_writes_are_not_committed(
+    session: AsyncSession,
+    audit_session_factory: async_sessionmaker[AsyncSession],
+):
+    await users_repo.create_user(
+        session,
+        username="rollback_probe_user",
+        addon_token="rollback_probe_token",
+    )
+    await session.flush()
 
-    async with await psycopg.AsyncConnection.connect(migrated_database_url) as other:
-        cur = await other.execute("SELECT to_regclass('rollback_probe')")
-        assert (await cur.fetchone()) == (None,)
+    async with audit_session_factory() as other:
+        found = await users_repo.get_user_by_username(other, username="rollback_probe_user")
+        assert found is None
