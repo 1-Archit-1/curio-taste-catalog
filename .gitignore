@@ -13,3 +13,5 @@ exports/
 *.zip
 .ruff_cache/
 *Token.txt
+frontend/node_modules/
+frontend/dist/

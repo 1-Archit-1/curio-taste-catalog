@@ -1,0 +1,65 @@
+.keyItem {
+  border-top: 1px solid var(--border);
+  padding: 14px 0;
+}
+
+.keyItem:first-of-type {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.keyHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.keyLabel {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyMeta {
+  font-size: 0.83rem;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  font-weight: 400;
+}
+
+.badgeOk {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.auditHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.auditHeader h2 {
+  margin: 0;
+}
+
+.mutedCell {
+  color: var(--muted);
+}
+
+.alignEnd {
+  align-self: flex-end;
+}

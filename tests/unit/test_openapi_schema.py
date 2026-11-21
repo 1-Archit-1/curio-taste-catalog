@@ -3,6 +3,7 @@
 from typing import Any
 
 from curio.api.app import create_app
+from curio.api.openapi import export_control_plane_openapi
 from curio.settings import Settings
 
 SETTINGS = Settings(_env_file=None, database_url="postgresql://unused@127.0.0.1:1/unused")
@@ -110,3 +111,12 @@ def test_openapi_schema_exposes_no_encrypted_key_or_response_key_values():
                 assert not leaked, (
                     f"{method.upper()} {path} ({status_code}) response schema leaks: {leaked}"
                 )
+
+
+def test_control_plane_openapi_export_excludes_addon_and_health_routes():
+    exported = export_control_plane_openapi()
+    paths = list(exported["paths"].keys())
+    assert paths, "Expected exported control-plane paths"
+    assert all(p.startswith("/api/") for p in paths)
+    assert "/healthz" not in paths
+    assert not any("manifest.json" in p for p in paths)
