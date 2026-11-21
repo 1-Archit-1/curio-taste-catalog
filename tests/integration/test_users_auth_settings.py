@@ -115,14 +115,73 @@ async def test_login_session_lifecycle(
     assert (await client.get("/api/auth/me")).status_code == 401
 
 
-async def test_settings_tab_html_contains_notice_and_all_providers(client: httpx.AsyncClient):
-    resp = await client.get("/")
-    assert resp.status_code == 200
-    html = resp.text
-    assert "server operator can technically access stored keys" in html.lower()
-    assert "dedicated gemini api key restricted to the gemini api with a quota cap" in html.lower()
-    for provider in ("tmdb", "gemini", "openai", "anthropic", "openrouter"):
-        assert provider in html.lower()
+async def test_spa_mount_redirect_fallback_and_route_isolation(
+    session: AsyncSession,
+    migrated_database_url: str,
+    keypair: Keypair,
+    tmp_path,
+):
+    """SPA is served under /app/, / redirects to /app/, and /api, /healthz, and addon routes
+    still resolve with CORS `*` limited strictly to addon routes.
+    """
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text(
+        "<!doctype html><html><body><div id='root'></div></body></html>",
+        encoding="utf-8",
+    )
+    (assets_dir / "app.js").write_text("console.log('curio');", encoding="utf-8")
+
+    app = create_app(
+        Settings(
+            _env_file=None,
+            database_url=migrated_database_url,
+            key_public_key=keypair.public_key,
+            key_private_key=None,
+            frontend_dist_dir=str(dist_dir),
+        )
+    )
+
+    async def test_session():
+        yield session
+
+    app.dependency_overrides[get_session] = test_session
+    provisioned = await users_service.create_user_with_login_token(session, username="spa_user")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # Root redirects to /app/ without CORS.
+        root = await client.get("/", follow_redirects=False)
+        assert root.status_code == 307
+        assert root.headers["location"] == "/app/"
+        assert "access-control-allow-origin" not in root.headers
+
+        # /app/ and SPA client routes serve index.html without CORS.
+        for spa_path in ("/app/", "/app/settings", "/app/login"):
+            resp = await client.get(spa_path)
+            assert resp.status_code == 200
+            assert "<div id='root'></div>" in resp.text
+            assert "access-control-allow-origin" not in resp.headers
+
+        # Built static assets under /app/assets/* resolve directly.
+        asset = await client.get("/app/assets/app.js")
+        assert asset.status_code == 200
+        assert "curio" in asset.text
+        assert "access-control-allow-origin" not in asset.headers
+
+        # /healthz, /api/*, and /{addon_token}/manifest.json are not shadowed.
+        health = await client.get("/healthz")
+        assert health.status_code == 200
+        assert "access-control-allow-origin" not in health.headers
+
+        api_me = await client.get("/api/auth/me")
+        assert api_me.status_code == 401
+        assert "access-control-allow-origin" not in api_me.headers
+
+        manifest = await client.get(f"/{provisioned.user.addon_token}/manifest.json")
+        assert manifest.status_code == 200
+        assert manifest.headers.get("access-control-allow-origin") == "*"
 
 
 async def test_keys_test_encrypt_store_no_leak_and_process_split(
@@ -512,12 +571,6 @@ async def test_login_deletes_only_that_users_expired_sessions(session: AsyncSess
     assert "alice-active" in alice_hashes
     assert len(alice_hashes) == 2  # the active one plus the new session
     assert await session_hashes(bob.user.id) == {"bob-expired"}
-
-
-async def test_ui_does_not_interpolate_last4_into_html(client: httpx.AsyncClient):
-    html = (await client.get("/")).text
-    assert "${info.last4" not in html
-    assert "last4El.textContent = info.last4" in html
 
 
 async def test_multi_user_isolation(
