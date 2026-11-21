@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { apiClient, extractErrorDetail } from "../api/client";
 import type { components } from "../api/schema";
 import styles from "./SettingsPage.module.css";
@@ -65,12 +71,22 @@ export function SettingsPage() {
 
   const [llmProvider, setLlmProvider] = useState<KeyType>("gemini");
   const [monthlyBudget, setMonthlyBudget] = useState("");
-  const [manifestStatus, setManifestStatus] = useState<StatusMessage>({ text: "", kind: "" });
-  const [prefsStatus, setPrefsStatus] = useState<StatusMessage>({ text: "", kind: "" });
+  const [manifestStatus, setManifestStatus] = useState<StatusMessage>({
+    text: "",
+    kind: "",
+  });
+  const [prefsStatus, setPrefsStatus] = useState<StatusMessage>({
+    text: "",
+    kind: "",
+  });
 
   // Submitted API keys live only in ephemeral component state until the request is sent.
-  const [keyInputs, setKeyInputs] = useState<Partial<Record<KeyType, string>>>({});
-  const [keyStatuses, setKeyStatuses] = useState<Partial<Record<KeyType, StatusMessage>>>({});
+  const [keyInputs, setKeyInputs] = useState<Partial<Record<KeyType, string>>>(
+    {},
+  );
+  const [keyStatuses, setKeyStatuses] = useState<
+    Partial<Record<KeyType, StatusMessage>>
+  >({});
   const [busyKey, setBusyKey] = useState<KeyType | null>(null);
 
   const manifestInputRef = useRef<HTMLInputElement | null>(null);
@@ -81,7 +97,8 @@ export function SettingsPage() {
       setSettings(data);
       setLlmProvider(data.llm_provider);
       setMonthlyBudget(
-        data.monthly_token_budget !== null && data.monthly_token_budget !== undefined
+        data.monthly_token_budget !== null &&
+          data.monthly_token_budget !== undefined
           ? String(data.monthly_token_budget)
           : "",
       );
@@ -106,7 +123,10 @@ export function SettingsPage() {
     if (!settings) return;
     try {
       await navigator.clipboard.writeText(settings.addon_manifest_url);
-      setManifestStatus({ text: "Copied manifest URL to clipboard.", kind: "ok" });
+      setManifestStatus({
+        text: "Copied manifest URL to clipboard.",
+        kind: "ok",
+      });
     } catch {
       manifestInputRef.current?.select();
       setManifestStatus({
@@ -124,7 +144,9 @@ export function SettingsPage() {
     ) {
       return;
     }
-    const { data, error, response } = await apiClient.POST("/api/settings/addon-token/rotate");
+    const { data, error, response } = await apiClient.POST(
+      "/api/settings/addon-token/rotate",
+    );
     if (response.ok && data) {
       setSettings((prev) =>
         prev ? { ...prev, addon_manifest_url: data.addon_manifest_url } : prev,
@@ -173,13 +195,17 @@ export function SettingsPage() {
     setBusyKey(keyType);
     setKeyStatus(keyType, { text: "Testing...", kind: "" });
     try {
-      const { data, error, response } = await apiClient.POST("/api/settings/keys/{key_type}/test", {
-        params: { path: { key_type: keyType } },
-        body: { api_key: val },
-      });
+      const { data, error, response } = await apiClient.POST(
+        "/api/settings/keys/{key_type}/test",
+        {
+          params: { path: { key_type: keyType } },
+          body: { api_key: val },
+        },
+      );
       if (response.ok && data) {
         setKeyStatus(keyType, {
-          text: data.detail || (data.ok ? "Key is valid." : "Validation failed."),
+          text:
+            data.detail || (data.ok ? "Key is valid." : "Validation failed."),
           kind: data.ok ? "ok" : "err",
         });
       } else if (response.status !== 401) {
@@ -202,13 +228,19 @@ export function SettingsPage() {
     setBusyKey(keyType);
     setKeyStatus(keyType, { text: "Testing and encrypting...", kind: "" });
     try {
-      const { data, error, response } = await apiClient.PUT("/api/settings/keys/{key_type}", {
-        params: { path: { key_type: keyType } },
-        body: { api_key: val },
-      });
+      const { data, error, response } = await apiClient.PUT(
+        "/api/settings/keys/{key_type}",
+        {
+          params: { path: { key_type: keyType } },
+          body: { api_key: val },
+        },
+      );
       if (response.ok && data) {
         setKeyInputs((prev) => ({ ...prev, [keyType]: "" }));
-        setKeyStatus(keyType, { text: `Saved (••••${data.last4}).`, kind: "ok" });
+        setKeyStatus(keyType, {
+          text: `Saved (••••${data.last4}).`,
+          kind: "ok",
+        });
         await loadSettings();
       } else if (response.status !== 401) {
         setKeyStatus(keyType, {
@@ -224,9 +256,12 @@ export function SettingsPage() {
   async function handleDeleteKey(keyType: KeyType) {
     setBusyKey(keyType);
     try {
-      const { error, response } = await apiClient.DELETE("/api/settings/keys/{key_type}", {
-        params: { path: { key_type: keyType } },
-      });
+      const { error, response } = await apiClient.DELETE(
+        "/api/settings/keys/{key_type}",
+        {
+          params: { path: { key_type: keyType } },
+        },
+      );
       if (response.ok) {
         setKeyStatus(keyType, { text: "Key removed.", kind: "ok" });
         await loadSettings();
@@ -268,8 +303,8 @@ export function SettingsPage() {
       <div className="card">
         <h2>Addon Manifest URL</h2>
         <p className="subtitle">
-          Install this secret URL in Stremio or Nuvio. Anyone with this URL can read your catalogs;
-          rotate it if leaked.
+          Install this secret URL in Stremio or Nuvio. Anyone with this URL can
+          read your catalogs; rotate it if leaked.
         </p>
         <div className="row">
           <input
@@ -295,7 +330,9 @@ export function SettingsPage() {
             Rotate URL
           </button>
         </div>
-        <div className={`status${manifestStatus.kind ? ` ${manifestStatus.kind}` : ""}`}>
+        <div
+          className={`status${manifestStatus.kind ? ` ${manifestStatus.kind}` : ""}`}
+        >
           {manifestStatus.text}
         </div>
       </div>
@@ -303,8 +340,8 @@ export function SettingsPage() {
       <div className="card">
         <h2>LLM Preferences &amp; Usage Controls</h2>
         <p className="subtitle">
-          Choose which configured LLM provider background generation should use, and optionally cap
-          monthly token usage.
+          Choose which configured LLM provider background generation should use,
+          and optionally cap monthly token usage.
         </p>
         <form className="row" onSubmit={(ev) => void handleSavePreferences(ev)}>
           <label className="field">
@@ -335,7 +372,9 @@ export function SettingsPage() {
             Save Preferences
           </button>
         </form>
-        <div className={`status${prefsStatus.kind ? ` ${prefsStatus.kind}` : ""}`}>
+        <div
+          className={`status${prefsStatus.kind ? ` ${prefsStatus.kind}` : ""}`}
+        >
           {prefsStatus.text}
         </div>
       </div>
@@ -343,17 +382,20 @@ export function SettingsPage() {
       <div className="card">
         <h2>API Keys</h2>
         <div className="notice">
-          <strong>Trust &amp; key safety notice:</strong> Stored API keys are encrypted with a
-          public key so the API process cannot read them, and decrypted only by background workers
-          during generation. However,{" "}
-          <strong>the server operator can technically access stored keys</strong> (you can self-host
-          Curio from the public repository if you prefer not to share keys). We strongly advise
-          creating a{" "}
+          <strong>Trust &amp; key safety notice:</strong> Stored API keys are
+          encrypted with a public key so the API process cannot read them, and
+          decrypted only by background workers during generation. However,{" "}
           <strong>
-            dedicated Gemini API key restricted to the Gemini API with a quota cap
+            the server operator can technically access stored keys
           </strong>{" "}
-          in Google Cloud — and similarly using dedicated, spend-capped keys for OpenAI, Anthropic,
-          or OpenRouter.
+          (you can self-host Curio from the public repository if you prefer not
+          to share keys). We strongly advise creating a{" "}
+          <strong>
+            dedicated Gemini API key restricted to the Gemini API with a quota
+            cap
+          </strong>{" "}
+          in Google Cloud — and similarly using dedicated, spend-capped keys for
+          OpenAI, Anthropic, or OpenRouter.
         </div>
 
         <div>
@@ -363,11 +405,18 @@ export function SettingsPage() {
               last4: null,
               updated_at: null,
             };
-            const rowStatus = keyStatuses[provider.id] ?? { text: "", kind: "" };
+            const rowStatus = keyStatuses[provider.id] ?? {
+              text: "",
+              kind: "",
+            };
             const isBusy = busyKey === provider.id;
 
             return (
-              <div key={provider.id} className={styles.keyItem} data-key-type={provider.id}>
+              <div
+                key={provider.id}
+                className={styles.keyItem}
+                data-key-type={provider.id}
+              >
                 <div className={styles.keyHeader}>
                   <span className={styles.keyLabel}>
                     {provider.label}{" "}
@@ -380,7 +429,9 @@ export function SettingsPage() {
                     )}
                   </span>
                   <span className={styles.keyMeta}>
-                    {info.updated_at ? `Updated ${formatUtcTimestamp(info.updated_at)}` : ""}
+                    {info.updated_at
+                      ? `Updated ${formatUtcTimestamp(info.updated_at)}`
+                      : ""}
                   </span>
                 </div>
                 <div className="row">
@@ -392,7 +443,10 @@ export function SettingsPage() {
                     autoComplete="off"
                     value={keyInputs[provider.id] ?? ""}
                     onChange={(ev) =>
-                      setKeyInputs((prev) => ({ ...prev, [provider.id]: ev.target.value }))
+                      setKeyInputs((prev) => ({
+                        ...prev,
+                        [provider.id]: ev.target.value,
+                      }))
                     }
                     disabled={isBusy}
                   />
@@ -423,7 +477,9 @@ export function SettingsPage() {
                     </button>
                   )}
                 </div>
-                <div className={`status${rowStatus.kind ? ` ${rowStatus.kind}` : ""}`}>
+                <div
+                  className={`status${rowStatus.kind ? ` ${rowStatus.kind}` : ""}`}
+                >
                   {rowStatus.text}
                 </div>
               </div>
@@ -435,12 +491,17 @@ export function SettingsPage() {
       <div className="card">
         <div className={styles.auditHeader}>
           <h2>Key Access Audit Log</h2>
-          <button className="btn" type="button" onClick={() => void loadAudit()}>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void loadAudit()}
+          >
             Refresh
           </button>
         </div>
         <p className="subtitle">
-          Every time a worker decrypts one of your keys, an entry is recorded here.
+          Every time a worker decrypts one of your keys, an entry is recorded
+          here.
         </p>
         <table>
           <thead>
@@ -461,7 +522,9 @@ export function SettingsPage() {
             ) : (
               auditEntries.map((entry) => (
                 <tr key={entry.id}>
-                  <td className="mono">{formatUtcTimestamp(entry.created_at)}</td>
+                  <td className="mono">
+                    {formatUtcTimestamp(entry.created_at)}
+                  </td>
                   <td className="mono">{entry.key_type}</td>
                   <td className="mono">{entry.job_id ?? "—"}</td>
                   <td>{entry.reason}</td>

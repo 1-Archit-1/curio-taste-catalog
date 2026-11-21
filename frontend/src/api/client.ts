@@ -47,7 +47,12 @@ export function extractErrorDetail(error: unknown, fallback: string): string {
     }
     if (Array.isArray(detail) && detail.length > 0) {
       const first = detail[0];
-      if (first && typeof first === "object" && "msg" in first && typeof first.msg === "string") {
+      if (
+        first &&
+        typeof first === "object" &&
+        "msg" in first &&
+        typeof first.msg === "string"
+      ) {
         return first.msg;
       }
     }

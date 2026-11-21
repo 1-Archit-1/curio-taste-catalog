@@ -6,7 +6,9 @@ export type UserSummary = components["schemas"]["UserSummaryResponse"];
 export interface AuthContextValue {
   user: UserSummary | null;
   loading: boolean;
-  login: (token: string) => Promise<{ ok: true } | { ok: false; detail: string }>;
+  login: (
+    token: string,
+  ) => Promise<{ ok: true } | { ok: false; detail: string }>;
   logout: () => Promise<void>;
 }
 

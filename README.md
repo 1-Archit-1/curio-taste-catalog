@@ -77,7 +77,7 @@ uv run pytest                 # unit + integration; evals excluded
 uv run pytest tests/unit      # no database needed
 uv run pytest -m eval         # live-LLM evals (opt-in, needs network and keys)
 
-npm --prefix frontend run lint
+npm --prefix frontend run lint      # Biome lint, format, and import-order check
 npm --prefix frontend run typecheck
 npm --prefix frontend test
 npm --prefix frontend run build

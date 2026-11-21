@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useAuth } from "../auth/useAuth";
 import styles from "./LoginPage.module.css";
@@ -49,7 +49,9 @@ export function LoginPage() {
 
       <section className={`card ${styles.loginBox}`}>
         <h2>Sign in</h2>
-        <p className="subtitle">Paste the login token issued by your instance operator.</p>
+        <p className="subtitle">
+          Paste the login token issued by your instance operator.
+        </p>
         <form onSubmit={(ev) => void handleSubmit(ev)}>
           <div className="row">
             <input
