@@ -46,6 +46,28 @@ uv run uvicorn --factory curio.api.app:create_app --reload
 uv run python -m curio.worker
 ```
 
+### Frontend (control plane)
+
+The control-plane UI is a React + TypeScript app in `frontend/` built with Vite and served by FastAPI under `/app/` (`/` redirects to `/app/`). Requires Node 22+ for local development and builds (the production Docker image builds the frontend in a separate stage and contains no Node at runtime).
+
+```sh
+cd frontend
+npm ci
+npm run dev       # Vite dev server on http://127.0.0.1:5173/app/ (proxies /api to uvicorn :8000)
+```
+
+To build static assets for FastAPI to serve directly at `http://127.0.0.1:8000/app/`:
+
+```sh
+npm --prefix frontend run build
+```
+
+Whenever `/api/*` Pydantic schemas change, regenerate and commit the TypeScript API types (CI fails if `frontend/src/api/schema.d.ts` is stale):
+
+```sh
+npm --prefix frontend run gen:api
+```
+
 ## Tests and lint
 
 ```sh
@@ -54,6 +76,11 @@ uv run ruff format --check .
 uv run pytest                 # unit + integration; evals excluded
 uv run pytest tests/unit      # no database needed
 uv run pytest -m eval         # live-LLM evals (opt-in, needs network and keys)
+
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend test
+npm --prefix frontend run build
 ```
 
 Integration tests use `TEST_DATABASE_URL` if set. Otherwise they start a throwaway `pgvector/pgvector:pg16` container with testcontainers, which needs Docker. Tests block real network access; mock outbound HTTP with the `respx_mock` fixture.
