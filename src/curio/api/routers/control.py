@@ -1,13 +1,31 @@
 """Authenticated control-plane routes (auth, settings, API keys, audit). No CORS."""
 
-from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from curio.api.deps import AppSettings, CurrentUser, DbSession
+from curio.api.schemas.auth import (
+    LoginRequest,
+    LoginResponse,
+    LogoutResponse,
+    UserSummaryResponse,
+)
+from curio.api.schemas.keys import (
+    ApiKeyRequest,
+    AuditEntryResponse,
+    AuditLogResponse,
+    KeyDeletedResponse,
+    KeySavedResponse,
+    KeyStatusResponse,
+    KeyTestResponse,
+)
+from curio.api.schemas.settings import (
+    RotateAddonTokenResponse,
+    SettingsResponse,
+    UpdateSettingsRequest,
+)
 from curio.clients.providers import LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
 from curio.db.models.users import User
@@ -17,25 +35,6 @@ from curio.services import users as users_service
 from curio.settings import Settings
 
 router = APIRouter(prefix="/api", tags=["control"])
-
-
-class LoginRequest(BaseModel):
-    token: str = Field(min_length=1)
-
-
-class ApiKeyRequest(BaseModel):
-    api_key: str = Field(min_length=1)
-
-
-class UpdateSettingsRequest(BaseModel):
-    llm_provider: KeyType
-    monthly_token_budget: int | None = Field(default=None, gt=0)
-
-
-class KeyStatusResponse(BaseModel):
-    configured: bool
-    last4: str | None = None
-    updated_at: datetime | None = None
 
 
 def _manifest_url(request: Request, settings: Settings, addon_token: str) -> str:
@@ -48,27 +47,27 @@ async def _build_settings_response(
     session: AsyncSession,
     settings: Settings,
     user: User,
-) -> dict[str, Any]:
+) -> SettingsResponse:
     metadata = await keys_service.list_user_key_metadata(session, user_id=user.id)
-    keys_payload: dict[str, dict[str, Any]] = {}
+    keys_payload: dict[KeyType, KeyStatusResponse] = {}
     for kt in KeyType:
         row = metadata.get(kt)
-        keys_payload[kt.value] = KeyStatusResponse(
+        keys_payload[kt] = KeyStatusResponse(
             configured=row is not None,
             last4=row.last4 if row else None,
             updated_at=row.updated_at if row else None,
-        ).model_dump(mode="json")
+        )
 
-    return {
-        "user_id": str(user.id),
-        "username": user.username,
-        "addon_manifest_url": _manifest_url(request, settings, user.addon_token),
-        "llm_provider": user.llm_provider,
-        "supported_llm_providers": [p.value for p in LLM_PROVIDERS],
-        "monthly_token_budget": user.monthly_token_budget,
-        "jobs_paused_reason": user.jobs_paused_reason,
-        "keys": keys_payload,
-    }
+    return SettingsResponse(
+        user_id=user.id,
+        username=user.username,
+        addon_manifest_url=_manifest_url(request, settings, user.addon_token),
+        llm_provider=KeyType(user.llm_provider),
+        supported_llm_providers=list(LLM_PROVIDERS),
+        monthly_token_budget=user.monthly_token_budget,
+        jobs_paused_reason=user.jobs_paused_reason,
+        keys=keys_payload,
+    )
 
 
 @router.post("/auth/login")
@@ -77,7 +76,7 @@ async def login(
     response: Response,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, Any]:
+) -> LoginResponse:
     result = await auth_service.exchange_login_token(
         session,
         login_token=payload.token,
@@ -99,12 +98,7 @@ async def login(
         max_age=settings.session_ttl_days * 86400,
         path="/",
     )
-    return {
-        "user": {
-            "id": str(user.id),
-            "username": user.username,
-        }
-    }
+    return LoginResponse(user=UserSummaryResponse(id=user.id, username=user.username))
 
 
 @router.post("/auth/logout")
@@ -114,20 +108,17 @@ async def logout(
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, bool]:
+) -> LogoutResponse:
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token:
         await auth_service.revoke_session(session, user_id=user.id, session_token=session_token)
     response.delete_cookie(key=settings.session_cookie_name, path="/")
-    return {"ok": True}
+    return LogoutResponse(ok=True)
 
 
 @router.get("/auth/me")
-async def me(user: CurrentUser) -> dict[str, str]:
-    return {
-        "id": str(user.id),
-        "username": user.username,
-    }
+async def me(user: CurrentUser) -> UserSummaryResponse:
+    return UserSummaryResponse(id=user.id, username=user.username)
 
 
 @router.get("/settings")
@@ -136,7 +127,7 @@ async def get_settings_view(
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, Any]:
+) -> SettingsResponse:
     return await _build_settings_response(request, session, settings, user)
 
 
@@ -147,7 +138,7 @@ async def update_settings_view(
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, Any]:
+) -> SettingsResponse:
     try:
         updated = await users_service.update_preferences(
             session,
@@ -170,11 +161,11 @@ async def rotate_addon_token(
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, str]:
+) -> RotateAddonTokenResponse:
     updated = await users_service.rotate_addon_token_for_user(session, user_id=user.id)
-    return {
-        "addon_manifest_url": _manifest_url(request, settings, updated.addon_token),
-    }
+    return RotateAddonTokenResponse(
+        addon_manifest_url=_manifest_url(request, settings, updated.addon_token),
+    )
 
 
 @router.post("/settings/keys/{key_type}/test")
@@ -182,13 +173,13 @@ async def test_api_key(
     key_type: KeyType,
     payload: ApiKeyRequest,
     _: CurrentUser,
-) -> dict[str, Any]:
+) -> KeyTestResponse:
     result = await keys_service.test_api_key(key_type, payload.api_key)
-    return {
-        "ok": result.ok,
-        "status_code": result.status_code,
-        "detail": result.detail,
-    }
+    return KeyTestResponse(
+        ok=result.ok,
+        status_code=result.status_code,
+        detail=result.detail,
+    )
 
 
 @router.put("/settings/keys/{key_type}")
@@ -198,7 +189,7 @@ async def save_api_key(
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
-) -> dict[str, Any]:
+) -> KeySavedResponse:
     try:
         row = await keys_service.set_user_api_key(
             session,
@@ -218,12 +209,12 @@ async def save_api_key(
             detail=str(exc),
         ) from exc
 
-    return {
-        "key_type": row.key_type,
-        "configured": True,
-        "last4": row.last4,
-        "updated_at": row.updated_at.isoformat(),
-    }
+    return KeySavedResponse(
+        key_type=KeyType(row.key_type),
+        configured=True,
+        last4=row.last4,
+        updated_at=row.updated_at,
+    )
 
 
 @router.delete("/settings/keys/{key_type}")
@@ -231,9 +222,9 @@ async def delete_api_key(
     key_type: KeyType,
     user: CurrentUser,
     session: DbSession,
-) -> dict[str, bool]:
+) -> KeyDeletedResponse:
     deleted = await keys_service.delete_user_api_key(session, user_id=user.id, key_type=key_type)
-    return {"deleted": deleted}
+    return KeyDeletedResponse(deleted=deleted)
 
 
 @router.get("/settings/audit")
@@ -241,17 +232,17 @@ async def get_audit_log(
     user: CurrentUser,
     session: DbSession,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-) -> dict[str, Any]:
+) -> AuditLogResponse:
     entries = await keys_service.list_user_audit_entries(session, user_id=user.id, limit=limit)
-    return {
-        "entries": [
-            {
-                "id": entry.id,
-                "key_type": entry.key_type,
-                "job_id": entry.job_id,
-                "reason": entry.reason,
-                "created_at": entry.created_at.isoformat(),
-            }
+    return AuditLogResponse(
+        entries=[
+            AuditEntryResponse(
+                id=entry.id,
+                key_type=KeyType(entry.key_type),
+                job_id=entry.job_id,
+                reason=entry.reason,
+                created_at=entry.created_at,
+            )
             for entry in entries
         ]
-    }
+    )

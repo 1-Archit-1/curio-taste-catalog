@@ -27,7 +27,8 @@ curio/api/routers  →  curio/services  →  curio/repositories  →  Postgres
 
 | Package | Role | May import |
 | --- | --- | --- |
-| `api/routers` | HTTP shape: parse, validate, call a service, format the response | `services`, `api/deps` |
+| `api/routers` | HTTP shape: parse, validate, call a service, format the response | `services`, `api/deps`, `api/schemas` |
+| `api/schemas` | Pydantic request and response models, one module per domain (`<domain>.py`). Never expose ORM models or secret fields | `pydantic`, domain enums |
 | `services` | Business logic | `repositories`, `clients` |
 | `repositories` | All database queries. Functions take an `AsyncSession` as their first argument | `sqlalchemy` + `db/models` |
 | `clients` | External HTTP (TMDB, Letterboxd RSS, Simkl, LLMs) | `httpx` only; never the DB |
@@ -39,7 +40,7 @@ Rules:
 - `clients` never touch the database. Services fetch with a client, then save with a repository.
 - Public addon routes (`api/routers/addon.py`; unauthenticated, CORS `*`) and authenticated control-plane routes (`api/routers/control.py`, under `/api`) are separate routers so auth and CORS policy apply per router.
 - No module-level DB state. `create_app()` builds the app; the lifespan creates an `AsyncEngine` and `async_sessionmaker` and stores them on `app.state`. Routes get a session through the `get_session` dependency (`api/deps.py`), which commits on success and rolls back on error. Code that needs an explicit transaction uses `session.begin_nested()` or a fresh session, never `session.commit()` inside a repository; inside the test fixture's outer transaction that becomes a savepoint, so test isolation still holds.
-- ORM models never reach an HTTP response; routes map to Pydantic schemas/responses explicitly, and display queries never select `encrypted_key`.
+- ORM models never reach an HTTP response; every `/api/*` route declares explicit Pydantic request/response models in `src/curio/api/schemas/<domain>.py` (request and response for a domain in one file), mapped explicitly from repository/service results. Display queries never select `encrypted_key`, and no API key value or ciphertext field may appear in response schemas.
 
 ## Data ownership
 
