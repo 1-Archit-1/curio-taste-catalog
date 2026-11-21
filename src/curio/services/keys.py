@@ -3,16 +3,15 @@
 Follows ADR 0002:
 - API processes encrypt with KEY_PUBLIC_KEY only; plaintext is tested, encrypted, and discarded.
 - Workers decrypt just-in-time via `get_llm_key` / `get_tmdb_key` (backed by `get_user_api_key`),
-  recording an audit row on every decryption. The audit row is committed on its own connection
-  from `audit_pool`, before the plaintext is returned, so it survives a rollback of the caller's
-  job transaction.
+  recording an audit row on every decryption. The audit row is committed in its own session
+  from `audit_session_factory`, before the plaintext is returned, so it survives a rollback of
+  the caller's job transaction.
 """
 
 from dataclasses import dataclass
 from uuid import UUID
 
-import psycopg
-from psycopg_pool import AsyncConnectionPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from curio.clients.providers import (
     LLM_PROVIDERS,
@@ -21,9 +20,10 @@ from curio.clients.providers import (
     validate_provider_key,
 )
 from curio.crypto import KeyDecryptor, KeyEncryptor, mask_last4
+from curio.db.models.keys import KeyDecryptAudit
 from curio.repositories import keys as keys_repo
 from curio.repositories import users as users_repo
-from curio.repositories.keys import ApiKeyMetadataRow, AuditEntryRow
+from curio.repositories.keys import ApiKeyMetadataRow
 
 
 class KeyValidationFailedError(ValueError):
@@ -46,7 +46,7 @@ async def test_api_key(key_type: KeyType, api_key: str) -> KeyValidationResult:
 
 
 async def set_user_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: KeyType,
@@ -65,7 +65,7 @@ async def set_user_api_key(
     last4 = mask_last4(cleaned)
 
     return await keys_repo.upsert_api_key(
-        conn,
+        session,
         user_id=user_id,
         key_type=key_type.value,
         encrypted_key=ciphertext,
@@ -74,27 +74,27 @@ async def set_user_api_key(
 
 
 async def list_user_key_metadata(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
 ) -> dict[KeyType, ApiKeyMetadataRow]:
-    rows = await keys_repo.list_api_key_metadata(conn, user_id=user_id)
+    rows = await keys_repo.list_api_key_metadata(session, user_id=user_id)
     return {KeyType(row.key_type): row for row in rows}
 
 
 async def delete_user_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     key_type: KeyType,
 ) -> bool:
-    return await keys_repo.delete_api_key(conn, user_id=user_id, key_type=key_type.value)
+    return await keys_repo.delete_api_key(session, user_id=user_id, key_type=key_type.value)
 
 
 async def get_user_api_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
-    audit_pool: AsyncConnectionPool,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     user_id: UUID,
     key_type: KeyType,
     job_id: str | None,
@@ -103,13 +103,13 @@ async def get_user_api_key(
 ) -> str:
     """Single worker key-access function: decrypts just-in-time and writes an audit row.
 
-    The key is read on `conn`, but the audit row is committed in its own transaction on a
-    connection from `audit_pool`, so a later rollback of `conn` cannot erase the record of the
+    The key is read on `session`, but the audit row is committed in its own session from
+    `audit_session_factory`, so a later rollback of `session` cannot erase the record of the
     decryption. If the audit write fails the error propagates and the plaintext is not returned.
     """
     decryptor = KeyDecryptor(private_key)
     row = await keys_repo.get_encrypted_api_key(
-        conn,
+        session,
         user_id=user_id,
         key_type=key_type.value,
     )
@@ -117,21 +117,22 @@ async def get_user_api_key(
         raise KeyNotFoundError(f"no {key_type.value} key configured for user {user_id}")
 
     plaintext = decryptor.decrypt(row.encrypted_key)
-    async with audit_pool.connection() as audit_conn, audit_conn.transaction():
+    async with audit_session_factory() as audit_session:
         await keys_repo.insert_decrypt_audit(
-            audit_conn,
+            audit_session,
             user_id=user_id,
             key_type=key_type.value,
             job_id=job_id,
             reason=reason,
         )
+        await audit_session.commit()
     return plaintext
 
 
 async def get_tmdb_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
-    audit_pool: AsyncConnectionPool,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     user_id: UUID,
     job_id: str | None,
     reason: str,
@@ -139,8 +140,8 @@ async def get_tmdb_key(
 ) -> str:
     """Decrypt the user's TMDB key for a worker job and log the access."""
     return await get_user_api_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=user_id,
         key_type=KeyType.TMDB,
         job_id=job_id,
@@ -150,9 +151,9 @@ async def get_tmdb_key(
 
 
 async def get_llm_key(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
-    audit_pool: AsyncConnectionPool,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     user_id: UUID,
     job_id: str | None,
     reason: str,
@@ -161,7 +162,7 @@ async def get_llm_key(
 ) -> ResolvedLlmKey:
     """Decrypt the user's active (or requested) LLM provider key for a worker job."""
     if provider is None:
-        user = await users_repo.get_user_by_id(conn, user_id=user_id)
+        user = await users_repo.get_user_by_id(session, user_id=user_id)
         if user is None:
             raise KeyNotFoundError(f"user {user_id} not found")
         provider = KeyType(user.llm_provider)
@@ -169,8 +170,8 @@ async def get_llm_key(
         raise ValueError(f"'{provider.value}' is not an LLM provider")
 
     plaintext = await get_user_api_key(
-        conn,
-        audit_pool=audit_pool,
+        session,
+        audit_session_factory=audit_session_factory,
         user_id=user_id,
         key_type=provider,
         job_id=job_id,
@@ -181,16 +182,16 @@ async def get_llm_key(
 
 
 async def list_user_audit_entries(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     user_id: UUID,
     limit: int = 50,
-) -> list[AuditEntryRow]:
-    return await keys_repo.list_decrypt_audit(conn, user_id=user_id, limit=limit)
+) -> list[KeyDecryptAudit]:
+    return await keys_repo.list_decrypt_audit(session, user_id=user_id, limit=limit)
 
 
 async def rotate_all_keys(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     *,
     old_private_key: str,
     new_public_key: str,
@@ -203,19 +204,19 @@ async def rotate_all_keys(
     decryptor = KeyDecryptor(old_private_key)
     encryptor = KeyEncryptor(new_public_key)
 
-    async with conn.transaction():
-        rows = await keys_repo.lock_all_encrypted_keys(conn)
+    async with session.begin_nested():
+        rows = await keys_repo.lock_all_encrypted_keys(session)
         for row in rows:
             plaintext = decryptor.decrypt(row.encrypted_key)
             new_ciphertext = encryptor.encrypt(plaintext)
             await keys_repo.update_encrypted_key(
-                conn,
+                session,
                 user_id=row.user_id,
                 key_type=row.key_type,
                 encrypted_key=new_ciphertext,
             )
             await keys_repo.insert_decrypt_audit(
-                conn,
+                session,
                 user_id=row.user_id,
                 key_type=row.key_type,
                 job_id=None,

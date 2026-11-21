@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from curio import ADDON_NAME, __version__
-from curio.api.deps import DbConn
+from curio.api.deps import DbSession
 from curio.services import users as users_service
 
 _ADDON_CORS_HEADERS = {
@@ -55,9 +55,9 @@ async def addon_cors_preflight(addon_token: str, rest: str) -> Response:
 @router.get("/{addon_token}/manifest.json")
 async def addon_manifest(
     addon_token: str,
-    conn: DbConn,
+    session: DbSession,
 ) -> JSONResponse:
-    user = await users_service.resolve_user_by_addon_token(conn, addon_token=addon_token)
+    user = await users_service.resolve_user_by_addon_token(session, addon_token=addon_token)
     if user is None:
         return JSONResponse({"detail": "Addon not found."}, status_code=404)
 

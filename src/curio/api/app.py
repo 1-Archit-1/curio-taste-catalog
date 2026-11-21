@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 import psycopg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from curio import ADDON_NAME
 from curio.api.routers import addon, control, health, ui
-from curio.db.pool import create_pool
+from curio.db.engine import create_engine, create_session_factory
 from curio.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -27,13 +29,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        pool = create_pool(settings)
-        await pool.open()
-        app.state.pool = pool
+        engine = create_engine(settings)
+        app.state.engine = engine
+        app.state.session_factory = create_session_factory(engine)
         try:
             yield
         finally:
-            await pool.close()
+            await engine.dispose()
 
     app = FastAPI(title=ADDON_NAME, lifespan=lifespan)
     app.state.settings = settings
@@ -43,10 +45,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ui.router)
     app.include_router(addon.router)
 
-    @app.exception_handler(psycopg.OperationalError)
-    async def database_unavailable(request: Request, exc: psycopg.OperationalError):
-        # Covers connection failures and pool timeouts (PoolTimeout subclasses it).
+    async def database_unavailable(request: Request, exc: Exception) -> JSONResponse:
         log.warning("database unavailable: %s", exc)
         return JSONResponse({"status": "unavailable", "database": "error"}, status_code=503)
+
+    app.add_exception_handler(psycopg.OperationalError, database_unavailable)
+    app.add_exception_handler(SQLAlchemyOperationalError, database_unavailable)
+    app.add_exception_handler(SQLAlchemyTimeoutError, database_unavailable)
 
     return app

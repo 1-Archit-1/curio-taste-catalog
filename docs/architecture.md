@@ -29,16 +29,17 @@ curio/api/routers  →  curio/services  →  curio/repositories  →  Postgres
 | --- | --- | --- |
 | `api/routers` | HTTP shape: parse, validate, call a service, format the response | `services`, `api/deps` |
 | `services` | Business logic | `repositories`, `clients` |
-| `repositories` | All SQL. Functions take a connection as their first argument | `psycopg` only |
+| `repositories` | All database queries. Functions take an `AsyncSession` as their first argument | `sqlalchemy` + `db/models` |
 | `clients` | External HTTP (TMDB, Letterboxd RSS, Simkl, LLMs) | `httpx` only; never the DB |
 | `worker` | Long-running jobs | `services` |
-| `db` | Pool construction and migration runner | |
+| `db` | Engine, session factory, declarative models, and Alembic migrations | |
 
 Rules:
-- Only `repositories` contain SQL. The exception is the migration runner and the `.sql` files it applies.
+- Only `repositories` contain database queries. The exception is Alembic migrations.
 - `clients` never touch the database. Services fetch with a client, then save with a repository.
 - Public addon routes (`api/routers/addon.py`; unauthenticated, CORS `*`) and authenticated control-plane routes (`api/routers/control.py`, under `/api`) are separate routers so auth and CORS policy apply per router.
-- No module-level DB state. `create_app()` builds the app; the lifespan opens an `AsyncConnectionPool` and stores it on `app.state.pool`. Routes get a connection through the `get_conn` dependency (`api/deps.py`), which commits on success and rolls back on error. Code that needs an explicit transaction uses `async with conn.transaction():` and never calls `conn.commit()`; inside the test fixture's transaction that becomes a savepoint, so test isolation still holds.
+- No module-level DB state. `create_app()` builds the app; the lifespan creates an `AsyncEngine` and `async_sessionmaker` and stores them on `app.state`. Routes get a session through the `get_session` dependency (`api/deps.py`), which commits on success and rolls back on error. Code that needs an explicit transaction uses `session.begin_nested()` or a fresh session, never `session.commit()` inside a repository; inside the test fixture's outer transaction that becomes a savepoint, so test isolation still holds.
+- ORM models never reach an HTTP response; routes map to Pydantic schemas/responses explicitly, and display queries never select `encrypted_key`.
 
 ## Data ownership
 
@@ -47,14 +48,14 @@ Rules:
 
 ## Migrations
 
-Migrations are numbered plain SQL files in `src/curio/db/migrations/` named `NNNN_description.sql`. Run them with `python -m curio.db.migrate` (the compose `migrate` service does this). The app never migrates on startup.
+Schema definitions live in SQLAlchemy 2.0 `Mapped[...]` models under `src/curio/db/models/`. Alembic configuration (`src/curio/db/alembic.ini`) and revisions (`src/curio/db/alembic/versions/`) live inside the package so the Docker image includes them. Run them with `alembic -c src/curio/db/alembic.ini upgrade head` (the compose `migrate` service does this). The app never migrates on startup.
 
-The runner takes a session-level `pg_advisory_lock`, so concurrent runs serialise. It records applied versions in `schema_migrations` and applies each pending file in its own transaction, so a failure leaves that migration unapplied. Re-running is a no-op. Migrations are forward-only. Statements that cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`) are not supported yet.
+`env.py` runs migrations asynchronously and takes a session-level `pg_advisory_lock`, so concurrent runs serialise. Re-running is a no-op, and `alembic check` in CI verifies that models and revisions agree. Existing databases created by the earlier SQL runner can be marked at the initial revision once with `alembic -c src/curio/db/alembic.ini stamp head`.
 
 ## Testing
 
 - `tests/unit/`: no database or network.
-- `tests/integration/`: real Postgres. Uses `TEST_DATABASE_URL` if set, otherwise a throwaway `pgvector/pgvector:pg16` container via testcontainers. Migrations run once per session. Each test's `conn` fixture is a transaction that is rolled back afterwards. The `client` fixture is an `httpx.AsyncClient` against the app with `get_conn` overridden to use that connection.
+- `tests/integration/`: real Postgres. Uses `TEST_DATABASE_URL` if set, otherwise a throwaway `pgvector/pgvector:pg16` container via testcontainers. Migrations run once per session. Each test's `session` fixture joins an `AsyncSession` to an outer transaction that is rolled back afterwards. The `client` fixture is an `httpx.AsyncClient` against the app with `get_session` overridden to use that session.
 - Outbound HTTP is mocked with `respx` (the `respx_mock` fixture). Real network is blocked by pytest-socket; only localhost and unix sockets are allowed. Postgres traffic goes through libpq, which pytest-socket does not intercept.
 - `evals/`: live-LLM evals, marked `eval` and excluded by default. Run with `uv run pytest -m eval`.
 - CI (`.github/workflows/ci.yml`) runs ruff and pytest on every push and PR against a pgvector service container.
