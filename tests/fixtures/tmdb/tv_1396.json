@@ -1,0 +1,44 @@
+{
+  "id": 1396,
+  "name": "Breaking Bad",
+  "first_air_date": "2008-01-20",
+  "overview": "A chemistry teacher turns to crime.",
+  "vote_average": 8.9,
+  "vote_count": 14000,
+  "poster_path": "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+  "created_by": [
+    {
+      "name": "Vince Gilligan"
+    }
+  ],
+  "external_ids": {
+    "imdb_id": "tt0903747",
+    "tvdb_id": 81189
+  },
+  "keywords": {
+    "results": [
+      {
+        "id": 1,
+        "name": "drug dealer"
+      }
+    ]
+  },
+  "credits": {
+    "cast": [
+      {
+        "name": "Bryan Cranston"
+      }
+    ],
+    "crew": []
+  },
+  "genres": [
+    {
+      "id": 18,
+      "name": "Drama"
+    },
+    {
+      "id": 80,
+      "name": "Crime"
+    }
+  ]
+}

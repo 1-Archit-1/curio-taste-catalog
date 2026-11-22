@@ -3,7 +3,9 @@
 from datetime import datetime
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    ARRAY,
     CheckConstraint,
     DateTime,
     Float,
@@ -51,6 +53,24 @@ class MediaItem(Base):
     poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Filled by TMDB hydration (#4). `hydrated_at` is NULL until then; hydrated rows are
+    # cache hits and never fetched again.
+    poster_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    genres: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    keywords: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    cast_names: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    directors: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    hydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # gemini-embedding-001 reduced to 768 dimensions and L2-normalized.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),

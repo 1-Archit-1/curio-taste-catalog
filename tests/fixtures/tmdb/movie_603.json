@@ -1,0 +1,56 @@
+{
+  "id": 603,
+  "imdb_id": "tt0133093",
+  "title": "The Matrix",
+  "release_date": "1999-03-30",
+  "overview": "A hacker learns the nature of his reality.",
+  "vote_average": 8.2,
+  "vote_count": 25000,
+  "poster_path": "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+  "external_ids": {
+    "imdb_id": "tt0133093"
+  },
+  "keywords": {
+    "id": 603,
+    "keywords": [
+      {
+        "id": 310,
+        "name": "artificial intelligence"
+      },
+      {
+        "id": 4563,
+        "name": "dystopia"
+      }
+    ]
+  },
+  "credits": {
+    "cast": [
+      {
+        "name": "Keanu Reeves"
+      },
+      {
+        "name": "Laurence Fishburne"
+      }
+    ],
+    "crew": [
+      {
+        "name": "Lana Wachowski",
+        "job": "Director"
+      },
+      {
+        "name": "Joel Silver",
+        "job": "Producer"
+      }
+    ]
+  },
+  "genres": [
+    {
+      "id": 28,
+      "name": "Action"
+    },
+    {
+      "id": 878,
+      "name": "Science Fiction"
+    }
+  ]
+}
