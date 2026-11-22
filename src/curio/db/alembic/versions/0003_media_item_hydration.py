@@ -44,6 +44,8 @@ def upgrade() -> None:
     op.add_column("media_items", sa.Column("original_language", sa.Text(), nullable=True))
     op.add_column("media_items", sa.Column("runtime", sa.Integer(), nullable=True))
     op.add_column("media_items", sa.Column("release_date", sa.Date(), nullable=True))
+    op.add_column("media_items", sa.Column("collection_id", sa.Integer(), nullable=True))
+    op.add_column("media_items", sa.Column("collection_name", sa.Text(), nullable=True))
     op.add_column(
         "media_items", sa.Column("hydrated_at", sa.DateTime(timezone=True), nullable=True)
     )
@@ -57,6 +59,8 @@ def downgrade() -> None:
     for name in (
         "embedding",
         "hydrated_at",
+        "collection_name",
+        "collection_id",
         "release_date",
         "runtime",
         "original_language",

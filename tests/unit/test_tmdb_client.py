@@ -119,6 +119,7 @@ async def test_hydrate_movie_uses_one_request(respx_mock):
     assert title.original_language == "en"
     assert title.runtime == 136
     assert title.release_date == date(1999, 3, 31)
+    assert (title.collection_id, title.collection_name) == (2344, "The Matrix Collection")
 
 
 async def test_hydrate_series_reads_external_ids_and_creators(respx_mock):
@@ -140,6 +141,7 @@ async def test_hydrate_series_reads_external_ids_and_creators(respx_mock):
     assert title.popularity == 127.3355
     assert title.original_language == "en"
     assert title.release_date == date(2008, 1, 20)
+    assert (title.collection_id, title.collection_name) == (None, None)
     # The recorded response has an empty `episode_run_time`.
     assert title.runtime is None
 
