@@ -148,6 +148,8 @@ async def hydrate_titles(
             original_language=title.original_language,
             runtime=title.runtime,
             release_date=title.release_date,
+            collection_id=title.collection_id,
+            collection_name=title.collection_name,
         )
     if first_error is not None:
         raise first_error

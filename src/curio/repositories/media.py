@@ -54,6 +54,8 @@ async def upsert_hydrated(
     original_language: str | None,
     runtime: int | None,
     release_date: date | None,
+    collection_id: int | None,
+    collection_name: str | None,
 ) -> MediaItem:
     values = {
         "imdb_id": imdb_id,
@@ -74,6 +76,8 @@ async def upsert_hydrated(
         "original_language": original_language,
         "runtime": runtime,
         "release_date": release_date,
+        "collection_id": collection_id,
+        "collection_name": collection_name,
         "hydrated_at": func.now(),
         "updated_at": func.now(),
     }

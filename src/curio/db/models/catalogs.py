@@ -74,6 +74,9 @@ class MediaItem(Base):
     # Minutes. Series: first `episode_run_time` entry. NULL when TMDB has none or reports 0.
     runtime: Mapped[int | None] = mapped_column(Integer, nullable=True)
     release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # TMDB collection (franchise), used to cap franchise clumps in a row. Movies only.
+    collection_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collection_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     hydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # gemini-embedding-001 reduced to 768 dimensions and L2-normalized.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)

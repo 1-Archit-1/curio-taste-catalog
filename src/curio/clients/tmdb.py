@@ -73,6 +73,9 @@ class TmdbTitle:
     original_language: str | None = None
     runtime: int | None = None
     release_date: date | None = None
+    # TMDB collection (franchise) for movies; series have none.
+    collection_id: int | None = None
+    collection_name: str | None = None
 
 
 def _year(date: str | None) -> int | None:
@@ -241,6 +244,7 @@ def _parse_title(media_type: MediaType, data: dict[str, Any]) -> TmdbTitle:
         directors = [c["name"] for c in data.get("created_by", [])]
     vote_count = data.get("vote_count")
     rating = data.get("vote_average") if vote_count else None
+    collection = data.get("belongs_to_collection") or {}
     return TmdbTitle(
         media_type=media_type,
         tmdb_id=ref.tmdb_id,
@@ -261,4 +265,6 @@ def _parse_title(media_type: MediaType, data: dict[str, Any]) -> TmdbTitle:
         original_language=data.get("original_language"),
         runtime=_runtime(media_type, data),
         release_date=_release_date(release),
+        collection_id=collection.get("id"),
+        collection_name=collection.get("name"),
     )
