@@ -1,6 +1,6 @@
 """Authenticated control-plane routes (auth, settings, API keys, audit). No CORS."""
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -16,6 +16,7 @@ from curio.api.schemas.auth import (
 from curio.api.schemas.catalogs import (
     CandidateListResponse,
     CandidateOut,
+    MediaType,
     MessageResponse,
     PresetCreateRequest,
     PresetListResponse,
@@ -24,6 +25,7 @@ from curio.api.schemas.catalogs import (
     SlotAssignRequest,
     SlotListResponse,
     SlotOut,
+    VetoKind,
     VetoOut,
     VetoRequest,
 )
@@ -264,6 +266,18 @@ async def get_audit_log(
     )
 
 
+def _preset_to_out(preset: catalogs_service.Preset) -> PresetOut:
+    return PresetOut(
+        id=preset.id,
+        name=preset.name,
+        media_type=cast(MediaType, preset.media_type),
+        min_rating=preset.min_rating,
+        criteria=preset.criteria,
+        created_at=preset.created_at,
+        updated_at=preset.updated_at,
+    )
+
+
 def _slot_to_out(slot: catalogs_service.SlotRow) -> SlotOut:
     return SlotOut(
         slot_id=slot.slot_id,
@@ -310,7 +324,7 @@ async def assign_slot(
 @router.get("/presets")
 async def list_presets(user: CurrentUser, session: DbSession) -> PresetListResponse:
     presets = await catalogs_service.list_presets(session, user_id=user.id)
-    return PresetListResponse(presets=[PresetOut.model_validate(p) for p in presets])
+    return PresetListResponse(presets=[_preset_to_out(p) for p in presets])
 
 
 @router.post("/presets", status_code=status.HTTP_201_CREATED)
@@ -327,7 +341,7 @@ async def create_preset(
         min_rating=payload.min_rating,
         criteria=payload.criteria,
     )
-    return PresetOut.model_validate(preset)
+    return _preset_to_out(preset)
 
 
 @router.patch("/presets/{preset_id}")
@@ -349,7 +363,7 @@ async def update_preset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Preset not found.",
         )
-    return PresetOut.model_validate(preset)
+    return _preset_to_out(preset)
 
 
 @router.delete("/presets/{preset_id}")
@@ -399,8 +413,9 @@ async def list_preset_candidates(
         preset_id=preset_id,
         candidates=[
             CandidateOut(
-                imdb_id=c.imdb_id,
                 media_type=c.media_type,
+                tmdb_id=c.tmdb_id,
+                imdb_id=c.imdb_id,
                 name=c.name,
                 year=c.year,
                 poster=catalogs_service.resolve_poster_url(c.poster_url, base_url=base_url),
@@ -416,9 +431,10 @@ async def list_preset_candidates(
     )
 
 
-@router.put("/vetoes/{imdb_id}")
+@router.put("/vetoes/{media_type}/{tmdb_id}")
 async def upsert_veto(
-    imdb_id: str,
+    media_type: MediaType,
+    tmdb_id: int,
     payload: VetoRequest,
     user: CurrentUser,
     session: DbSession,
@@ -427,7 +443,8 @@ async def upsert_veto(
         veto = await catalogs_service.upsert_veto(
             session,
             user_id=user.id,
-            imdb_id=imdb_id,
+            media_type=media_type,
+            tmdb_id=tmdb_id,
             kind=payload.kind,
         )
     except LookupError as exc:
@@ -435,18 +452,24 @@ async def upsert_veto(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    return VetoOut.model_validate(veto)
+    return VetoOut(
+        media_type=cast(MediaType, veto.media_type),
+        tmdb_id=veto.tmdb_id,
+        kind=cast(VetoKind, veto.kind),
+    )
 
 
-@router.delete("/vetoes/{imdb_id}")
+@router.delete("/vetoes/{media_type}/{tmdb_id}")
 async def delete_veto(
-    imdb_id: str,
+    media_type: MediaType,
+    tmdb_id: int,
     user: CurrentUser,
     session: DbSession,
 ) -> MessageResponse:
     await catalogs_service.delete_veto(
         session,
         user_id=user.id,
-        imdb_id=imdb_id,
+        media_type=media_type,
+        tmdb_id=tmdb_id,
     )
     return MessageResponse(message="Veto removed.")

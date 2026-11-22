@@ -1,10 +1,22 @@
 """Catalog, preset, slot, watch-history, and veto persistence using SQLAlchemy 2.0."""
 
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
-from sqlalchemy import column, delete, exists, func, insert, select, table, text, update
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    column,
+    delete,
+    exists,
+    func,
+    insert,
+    select,
+    table,
+    text,
+    update,
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,11 +33,11 @@ MediaType = Literal["movie", "series"]
 VetoKind = Literal["seen", "not_for_me"]
 
 
-class _UnsetType:
-    pass
+class UnsetType:
+    """Type of `UNSET`: marks a partial-update argument the caller did not supply."""
 
 
-_UNSET = _UnsetType()
+UNSET = UnsetType()
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,11 @@ FIXED_SLOTS: tuple[SlotDefinition, ...] = (
 FIXED_SLOTS_BY_ID: dict[str, SlotDefinition] = {slot.slot_id: slot for slot in FIXED_SLOTS}
 
 
+def _same_title(a: Any, b: Any) -> ColumnElement[bool]:
+    """Join condition on the TMDB title key `(media_type, tmdb_id)`."""
+    return and_(a.media_type == b.media_type, a.tmdb_id == b.tmdb_id)
+
+
 @dataclass(frozen=True)
 class SlotRow:
     slot_id: str
@@ -60,14 +77,14 @@ class SlotRow:
 
 @dataclass(frozen=True)
 class CandidateRow:
-    imdb_id: str
     media_type: MediaType
+    tmdb_id: int
+    imdb_id: str | None
     name: str
     year: int | None
     poster_url: str | None
     description: str | None
     rating: float | None
-    tmdb_id: int | None
     position: int
     blurb: str | None
     watch_status: str | None
@@ -89,13 +106,15 @@ class CatalogItemRow:
 
 @dataclass(frozen=True)
 class ExcludedTitleRow:
-    imdb_id: str
+    media_type: str
+    tmdb_id: int
     reason: str
 
 
 @dataclass(frozen=True)
 class AntiTasteRow:
-    imdb_id: str
+    media_type: str
+    tmdb_id: int
     reason: str
     rating: float | None
 
@@ -162,16 +181,16 @@ async def update_preset(
     *,
     user_id: UUID,
     preset_id: UUID,
-    name: str | _UnsetType = _UNSET,
-    min_rating: float | None | _UnsetType = _UNSET,
-    criteria: str | None | _UnsetType = _UNSET,
+    name: str | UnsetType = UNSET,
+    min_rating: float | None | UnsetType = UNSET,
+    criteria: str | None | UnsetType = UNSET,
 ) -> Preset | None:
     values: dict[str, object] = {"updated_at": func.now()}
-    if not isinstance(name, _UnsetType):
+    if not isinstance(name, UnsetType):
         values["name"] = name
-    if not isinstance(min_rating, _UnsetType):
+    if not isinstance(min_rating, UnsetType):
         values["min_rating"] = min_rating
-    if not isinstance(criteria, _UnsetType):
+    if not isinstance(criteria, UnsetType):
         values["criteria"] = criteria
 
     stmt = (
@@ -286,14 +305,14 @@ async def list_preset_candidates(
 ) -> list[CandidateRow]:
     stmt = (
         select(
-            CatalogCandidate.imdb_id,
             MediaItem.media_type,
+            MediaItem.tmdb_id,
+            MediaItem.imdb_id,
             MediaItem.name,
             MediaItem.year,
             MediaItem.poster_url,
             MediaItem.description,
             MediaItem.rating,
-            MediaItem.tmdb_id,
             CatalogCandidate.position,
             CatalogCandidate.blurb,
             WatchHistory.status.label("watch_status"),
@@ -301,32 +320,32 @@ async def list_preset_candidates(
             Veto.kind.label("veto_kind"),
         )
         .select_from(CatalogCandidate)
-        .join(MediaItem, CatalogCandidate.imdb_id == MediaItem.imdb_id)
+        .join(MediaItem, _same_title(CatalogCandidate, MediaItem))
         .outerjoin(
             WatchHistory,
-            (WatchHistory.user_id == user_id) & (WatchHistory.imdb_id == CatalogCandidate.imdb_id),
+            (WatchHistory.user_id == user_id) & _same_title(WatchHistory, CatalogCandidate),
         )
         .outerjoin(
             Veto,
-            (Veto.user_id == user_id) & (Veto.imdb_id == CatalogCandidate.imdb_id),
+            (Veto.user_id == user_id) & _same_title(Veto, CatalogCandidate),
         )
         .where(
             CatalogCandidate.user_id == user_id,
             CatalogCandidate.preset_id == preset_id,
         )
-        .order_by(CatalogCandidate.position, CatalogCandidate.imdb_id)
+        .order_by(CatalogCandidate.position, CatalogCandidate.tmdb_id)
     )
     rows = (await session.execute(stmt)).all()
     return [
         CandidateRow(
-            imdb_id=row.imdb_id,
             media_type=cast(MediaType, row.media_type),
+            tmdb_id=row.tmdb_id,
+            imdb_id=row.imdb_id,
             name=row.name,
             year=row.year,
             poster_url=row.poster_url,
             description=row.description,
             rating=row.rating,
-            tmdb_id=row.tmdb_id,
             position=row.position,
             blurb=row.blurb,
             watch_status=row.watch_status,
@@ -362,19 +381,21 @@ async def query_slot_catalog(
     if preset_row is None:
         return []
 
-    excluded_titles = table("excluded_titles", column("user_id"), column("imdb_id"))
+    excluded_titles = table(
+        "excluded_titles", column("user_id"), column("media_type"), column("tmdb_id")
+    )
     is_excluded = exists(
         select(1)
         .select_from(excluded_titles)
         .where(
             excluded_titles.c.user_id == user_id,
-            excluded_titles.c.imdb_id == CatalogCandidate.imdb_id,
+            _same_title(excluded_titles.c, CatalogCandidate),
         )
     )
 
     stmt = (
         select(
-            CatalogCandidate.imdb_id,
+            MediaItem.imdb_id,
             MediaItem.media_type,
             MediaItem.name,
             MediaItem.year,
@@ -384,10 +405,12 @@ async def query_slot_catalog(
             MediaItem.rating,
         )
         .select_from(CatalogCandidate)
-        .join(MediaItem, CatalogCandidate.imdb_id == MediaItem.imdb_id)
+        .join(MediaItem, _same_title(CatalogCandidate, MediaItem))
         .where(
             CatalogCandidate.user_id == user_id,
             CatalogCandidate.preset_id == preset_row.id,
+            # Stremio/Nuvio address items by IMDb ID, so titles without one can't be served.
+            MediaItem.imdb_id.is_not(None),
             ~is_excluded,
         )
     )
@@ -398,12 +421,12 @@ async def query_slot_catalog(
         )
 
     stmt = (
-        stmt.order_by(CatalogCandidate.position, CatalogCandidate.imdb_id).offset(skip).limit(limit)
+        stmt.order_by(CatalogCandidate.position, CatalogCandidate.tmdb_id).offset(skip).limit(limit)
     )
     rows = (await session.execute(stmt)).all()
     return [
         CatalogItemRow(
-            imdb_id=row.imdb_id,
+            imdb_id=cast(str, row.imdb_id),
             media_type=row.media_type,
             name=row.name,
             year=row.year,
@@ -420,17 +443,19 @@ async def upsert_veto(
     session: AsyncSession,
     *,
     user_id: UUID,
-    imdb_id: str,
+    media_type: str,
+    tmdb_id: int,
     kind: str,
 ) -> Veto:
     insert_stmt = postgresql.insert(Veto).values(
         user_id=user_id,
-        imdb_id=imdb_id,
+        media_type=media_type,
+        tmdb_id=tmdb_id,
         kind=kind,
     )
     stmt = (
         insert_stmt.on_conflict_do_update(
-            index_elements=[Veto.user_id, Veto.imdb_id],
+            index_elements=[Veto.user_id, Veto.media_type, Veto.tmdb_id],
             set_={
                 "kind": insert_stmt.excluded.kind,
                 "updated_at": func.now(),
@@ -446,9 +471,14 @@ async def delete_veto(
     session: AsyncSession,
     *,
     user_id: UUID,
-    imdb_id: str,
+    media_type: str,
+    tmdb_id: int,
 ) -> bool:
-    stmt = delete(Veto).where(Veto.user_id == user_id, Veto.imdb_id == imdb_id)
+    stmt = delete(Veto).where(
+        Veto.user_id == user_id,
+        Veto.media_type == media_type,
+        Veto.tmdb_id == tmdb_id,
+    )
     result = await session.execute(stmt)
     return (result.rowcount or 0) > 0
 
@@ -459,11 +489,14 @@ async def list_excluded_titles(
     user_id: UUID,
 ) -> list[ExcludedTitleRow]:
     stmt = text(
-        "SELECT imdb_id, reason FROM excluded_titles "
-        "WHERE user_id = :user_id ORDER BY imdb_id, reason"
+        "SELECT media_type, tmdb_id, reason FROM excluded_titles "
+        "WHERE user_id = :user_id ORDER BY media_type, tmdb_id, reason"
     )
     rows = (await session.execute(stmt, {"user_id": user_id})).all()
-    return [ExcludedTitleRow(imdb_id=row.imdb_id, reason=row.reason) for row in rows]
+    return [
+        ExcludedTitleRow(media_type=row.media_type, tmdb_id=row.tmdb_id, reason=row.reason)
+        for row in rows
+    ]
 
 
 async def list_anti_taste(
@@ -472,19 +505,32 @@ async def list_anti_taste(
     user_id: UUID,
 ) -> list[AntiTasteRow]:
     stmt = text(
-        "SELECT imdb_id, reason, rating FROM anti_taste "
-        "WHERE user_id = :user_id ORDER BY imdb_id, reason"
+        "SELECT media_type, tmdb_id, reason, rating FROM anti_taste "
+        "WHERE user_id = :user_id ORDER BY media_type, tmdb_id, reason"
     )
     rows = (await session.execute(stmt, {"user_id": user_id})).all()
-    return [AntiTasteRow(imdb_id=row.imdb_id, reason=row.reason, rating=row.rating) for row in rows]
+    return [
+        AntiTasteRow(
+            media_type=row.media_type,
+            tmdb_id=row.tmdb_id,
+            reason=row.reason,
+            rating=row.rating,
+        )
+        for row in rows
+    ]
 
 
 async def media_item_exists(
     session: AsyncSession,
     *,
-    imdb_id: str,
+    media_type: str,
+    tmdb_id: int,
 ) -> bool:
-    stmt = select(1).select_from(MediaItem).where(MediaItem.imdb_id == imdb_id)
+    stmt = (
+        select(1)
+        .select_from(MediaItem)
+        .where(MediaItem.media_type == media_type, MediaItem.tmdb_id == tmdb_id)
+    )
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
@@ -495,7 +541,9 @@ async def insert_media_items_ignore_conflicts(
     if not rows:
         return
     stmt = (
-        postgresql.insert(MediaItem).values(rows).on_conflict_do_nothing(index_elements=["imdb_id"])
+        postgresql.insert(MediaItem)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["media_type", "tmdb_id"])
     )
     await session.execute(stmt)
 
@@ -523,7 +571,7 @@ async def insert_candidates_ignore_conflicts(
     stmt = (
         postgresql.insert(CatalogCandidate)
         .values(rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "preset_id", "imdb_id"])
+        .on_conflict_do_nothing(index_elements=["user_id", "preset_id", "media_type", "tmdb_id"])
     )
     await session.execute(stmt)
 
@@ -537,7 +585,7 @@ async def insert_watch_history_ignore_conflicts(
     stmt = (
         postgresql.insert(WatchHistory)
         .values(rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
+        .on_conflict_do_nothing(index_elements=["user_id", "media_type", "tmdb_id"])
     )
     await session.execute(stmt)
 
@@ -551,6 +599,6 @@ async def insert_vetoes_ignore_conflicts(
     stmt = (
         postgresql.insert(Veto)
         .values(rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
+        .on_conflict_do_nothing(index_elements=["user_id", "media_type", "tmdb_id"])
     )
     await session.execute(stmt)

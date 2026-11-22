@@ -34,7 +34,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 1995,
         "rating": 8.6,
         "tmdb_id": 807,
-        "poster_url": "https://image.tmdb.org/t/p/w500/6yoghtyTpznpBik8EngEmJskVUO.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/191nKfP0ehp3uIvWqgPbFmI4lv9.jpg",
         "description": (
             "Two detectives hunt a serial killer who uses the seven deadly sins as his motives."
         ),
@@ -45,7 +45,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2013,
         "rating": 8.2,
         "tmdb_id": 146233,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/uhviyknTT5cEQXbn6vWIqfM4vGm.jpg",
         "description": (
             "When two young girls go missing, a desperate father takes matters into his own hands."
         ),
@@ -56,7 +56,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2007,
         "rating": 7.7,
         "tmdb_id": 1949,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/6YmeO4pB7XTh8P8F960O1uA14JO.jpg",
         "description": (
             "Cartoonists and detectives become obsessed with tracking the Zodiac killer in San "
             "Francisco."
@@ -91,7 +91,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 7.6,
         "tmdb_id": 273481,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/lz8vNyXeidqqOdJW9ZjnDAMb5Vr.jpg",
         "description": (
             "An idealistic FBI agent is enlisted by a government task force to aid in the "
             "escalating war on drugs."
@@ -115,7 +115,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2004,
         "rating": 7.5,
         "tmdb_id": 1538,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/nV5316WUsVij8sVXLCF1g7TFitg.jpg",
         "description": (
             "A cab driver finds himself the hostage of an engaging contract killer making his "
             "rounds."
@@ -138,7 +138,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2000,
         "rating": 8.4,
         "tmdb_id": 77,
-        "poster_url": "https://image.tmdb.org/t/p/w500/yuNs09hvpHVU1cBTCAk9zxsL2oW.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/nzlv62aC0octS5AklAiWpXLX9Z0.jpg",
         "description": (
             "A man with short-term memory loss uses Polaroids and tattoos to hunt his wife's "
             "killer."
@@ -162,7 +162,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2003,
         "rating": 8.1,
         "tmdb_id": 11423,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/jcgUjx1QcupGzjntTVlnQ15lHqy.jpg",
         "description": (
             "Two detectives in a small Korean province struggle to solve a string of baffling "
             "murders."
@@ -174,7 +174,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2014,
         "rating": 8.1,
         "tmdb_id": 210577,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/ts996lKsxvjkO2yiYG0ht4qAicO.jpg",
         "description": (
             "With his wife's disappearance having become the focus of an intense media circus, "
             "a man sees suspicion fall on him."
@@ -186,7 +186,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2010,
         "rating": 8.2,
         "tmdb_id": 11324,
-        "poster_url": "https://image.tmdb.org/t/p/w500/kve20tXwUZpu4GUX8l6X7Z4jmL6.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/nrmXQ0zcZUL8jFLrakWc90IR8z9.jpg",
         "description": (
             "A U.S. Marshal investigates a psychiatric facility on a remote island after a "
             "patient vanishes."
@@ -221,7 +221,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 8.1,
         "tmdb_id": 76341,
-        "poster_url": "https://image.tmdb.org/t/p/w500/8tZYtuWezp8JbcsvHYO0O46tFbo.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/ulcAi4dKpAjHwYGS08vNyx9H6I9.jpg",
         "description": (
             "In a post-apocalyptic wasteland, a woman rebels against a tyrannical ruler in "
             "search of her homeland."
@@ -245,7 +245,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 7.3,
         "tmdb_id": 429200,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/yE1c9hj5Hf8a9KplAdRdhADqUro.jpg",
         "description": (
             "After a botched bank robbery lands his younger brother in prison, a man embarks on "
             "a twisted odyssey."
@@ -257,7 +257,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 7.0,
         "tmdb_id": 313922,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/evZicaR7nXe4LiD9G6QYTorcJGO.jpg",
         "description": (
             "A punk rock band is forced to fight for survival after witnessing a murder at an "
             "isolated venue."
@@ -269,7 +269,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 7.7,
         "tmdb_id": 395834,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/pySivdR845Hom4u4T2WNkJxe6Ad.jpg",
         "description": (
             "A wildlife tracker and an FBI agent investigate a murder on a snowy Wyoming "
             "reservation."
@@ -304,19 +304,19 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 1997,
         "rating": 7.7,
         "tmdb_id": 2649,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/eRInC7NTiDkt6dnm7Ryzu4hQZEs.jpg",
         "description": (
             "After a wealthy San Francisco banker is given an unusual birthday gift, his life "
             "spirals out of control."
         ),
     },
     {
-        "imdb_id": "tt1758830",
+        "imdb_id": "tt1758810",
         "name": "The Snowman",
         "year": 2017,
         "rating": 4.7,
         "tmdb_id": 372343,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/mKsQ8KMOk0VBX26Ev0Lj6EmfGJu.jpg",
         "description": (
             "Detective Harry Hole investigates the disappearance of a woman whose scarf is "
             "found on a snowman."
@@ -331,7 +331,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2022,
         "rating": 8.7,
         "tmdb_id": 95396,
-        "poster_url": "https://image.tmdb.org/t/p/w500/lFf6LLrQjYldcZItzOkGmMMigP7.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg",
         "description": (
             "Mark leads a team of office workers whose memories have been surgically divided "
             "between work and personal lives."
@@ -343,7 +343,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 8.7,
         "tmdb_id": 70523,
-        "poster_url": "https://image.tmdb.org/t/p/w500/apbrbWs8M9lyOpJYU5WXrpFbk1Z.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/wiiyc3m6HKaQhFBYeuM7ySCNQsG.jpg",
         "description": (
             "A family saga with a supernatural twist, set in a German town where the "
             "disappearance of children exposes secrets."
@@ -355,7 +355,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2022,
         "rating": 8.4,
         "tmdb_id": 83867,
-        "poster_url": "https://image.tmdb.org/t/p/w500/59SVNwLfoMnZPPB6ukW6dlPxAdI.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/khZqmwHQicTYoS7Flreb9EddFZC.jpg",
         "description": (
             "In an era filled with danger and intrigue, Cassian Andor embarks on a path "
             "destined to turn him into a rebel hero."
@@ -367,7 +367,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 8.5,
         "tmdb_id": 63639,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/8djpxDeWpINnGhjpFXQjnBe6zbx.jpg",
         "description": (
             "A hardened detective and a rogue ship's crew uncover a vast conspiracy that "
             "threatens the Solar System."
@@ -379,7 +379,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2023,
         "rating": 8.1,
         "tmdb_id": 125988,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/r2QXomqKjkKHVtYGGtkf2l2Y7go.jpg",
         "description": (
             "Men and women live in a giant silo underground with several regulations they "
             "believe protect them."
@@ -391,7 +391,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2021,
         "rating": 7.6,
         "tmdb_id": 93740,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/tg9I5pOY4M9CKj8U0cxVBTsm5eh.jpg",
         "description": (
             "A complex saga of humans scattered on planets throughout the galaxy all living "
             "under the rule of the Galactic Empire."
@@ -414,32 +414,32 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "name": "Devs",
         "year": 2020,
         "rating": 7.7,
-        "tmdb_id": 91363,
-        "poster_url": None,
+        "tmdb_id": 81349,
+        "poster_url": "https://image.tmdb.org/t/p/w500/uv63iNWOh69bSJYJQZjiX6n8B3m.jpg",
         "description": (
             "A computer engineer investigates the secretive development division in her "
             "company, which she believes is behind her boyfriend's disappearance."
         ),
     },
     {
-        "imdb_id": "tt2699110",
+        "imdb_id": "tt2699128",
         "name": "The Leftovers",
         "year": 2014,
         "rating": 8.3,
         "tmdb_id": 54344,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/NKJdryIFHr245Umq6gXsf7oULW.jpg",
         "description": (
             "Three years after the disappearance of two percent of the global population, a "
             "group of people in New York struggle to continue."
         ),
     },
     {
-        "imdb_id": "tt10574558",
+        "imdb_id": "tt10574236",
         "name": "Station Eleven",
         "year": 2021,
         "rating": 7.7,
-        "tmdb_id": 111044,
-        "poster_url": None,
+        "tmdb_id": 90972,
+        "poster_url": "https://image.tmdb.org/t/p/w500/xWlhMOzRxUpu4uzkWcDQOaESCE.jpg",
         "description": (
             "A post-apocalyptic saga spanning multiple timelines, telling the stories of "
             "survivors of a devastating flu."
@@ -451,7 +451,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 8.5,
         "tmdb_id": 62560,
-        "poster_url": "https://image.tmdb.org/t/p/w500/oKIBhzZzDX07SoE2bOLhq2EE8rf.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/kv1nRqgebSsREnd7vdC2pSGjpLo.jpg",
         "description": (
             "Elliot, a brilliant but unstable cyber-security engineer and vigilante hacker, "
             "becomes a key figure in a complex game."
@@ -463,7 +463,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2010,
         "rating": 8.4,
         "tmdb_id": 1426,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/hDxOMX8zzH1FiqKWVBzNaYGBkle.jpg",
         "description": (
             "DCI John Luther is a near-genius murder detective whose brilliant mind can't "
             "always save him from the dark."
@@ -475,7 +475,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2018,
         "rating": 7.9,
         "tmdb_id": 68421,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/AisK4uFsnwwmMkSynFpNl0VeGR.jpg",
         "description": (
             "Set in a future where consciousness is digitized and stored, a prisoner returns to "
             "life in a new body."
@@ -487,7 +487,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2011,
         "rating": 8.5,
         "tmdb_id": 1411,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/f8aIvYk5h7Z8EP3dinCmVgQFYow.jpg",
         "description": (
             "An ex-CIA agent and a wealthy programmer save lives via a surveillance AI that "
             "sends them the identities of civilians."
@@ -499,7 +499,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2011,
         "rating": 8.7,
         "tmdb_id": 42009,
-        "poster_url": "https://image.tmdb.org/t/p/w500/5UaYsGZOFhjFDwQh6GuLjjA1WlF.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/seN6rRfN0I6n8iDXjlSMk1QjNcq.jpg",
         "description": (
             "An anthology series exploring a twisted, high-tech multiverse where humanity's "
             "greatest innovations collide with its darkest instincts."
@@ -511,7 +511,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2019,
         "rating": 8.1,
         "tmdb_id": 87917,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/JP3DItWMbrrLiKR5AYUfpsNf2b.jpg",
         "description": (
             "In an alternative version of 1969, the Soviet Union beats the United States to the "
             "Moon, and the space race continues."
@@ -535,19 +535,19 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2024,
         "rating": 7.5,
         "tmdb_id": 108545,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/ykZ7hlShkdRQaL2aiieXdEMmrLb.jpg",
         "description": (
             "A fateful decision made in 1960s China reverberates in the present day, where a "
             "group of scientists confront humanity's greatest threat."
         ),
     },
     {
-        "imdb_id": "tt15438246",
+        "imdb_id": "tt21056886",
         "name": "Scavengers Reign",
         "year": 2023,
         "rating": 8.7,
-        "tmdb_id": 203744,
-        "poster_url": None,
+        "tmdb_id": 204154,
+        "poster_url": "https://image.tmdb.org/t/p/w500/bFlVZV8TQbs8hcIY7PVYonYFMgK.jpg",
         "description": (
             "The surviving crew of a damaged deep space freighter are stranded on a beautiful "
             "yet unforgiving alien planet."
@@ -559,7 +559,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2014,
         "rating": 8.9,
         "tmdb_id": 60622,
-        "poster_url": "https://image.tmdb.org/t/p/w500/6U9CPeD8obHzweikFhiLhpc7YBT.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/a3VW6khsyUVKrG0GBCWFG3NzWPX.jpg",
         "description": (
             "Various chronicles of deception, intrigue, and murder in and around frozen Minnesota."
         ),
@@ -570,7 +570,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2018,
         "rating": 8.8,
         "tmdb_id": 76331,
-        "poster_url": "https://image.tmdb.org/t/p/w500/7HW47XbkNQ5fiwQFYGWdw9gs144.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg",
         "description": (
             "The Roy family is known for controlling the biggest media and entertainment "
             "company in the world."
@@ -582,14 +582,14 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2019,
         "rating": 8.3,
         "tmdb_id": 85552,
-        "poster_url": "https://image.tmdb.org/t/p/w500/3Q0hd3heuWwDWpwcDkhQOA6TYWI.jpg",
+        "poster_url": "https://image.tmdb.org/t/p/w500/aJrG7OkoTMPWG5c8opz8a93AZPY.jpg",
         "description": (
             "A look at life for a group of high school students as they grapple with issues of "
             "drugs, sex, and violence."
         ),
     },
     {
-        "imdb_id": "tt2077823",
+        "imdb_id": "tt4635282",
         "name": "The OA",
         "year": 2016,
         "rating": 7.8,
@@ -618,7 +618,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2018,
         "rating": 5.2,
         "tmdb_id": 75450,
-        "poster_url": None,
+        "poster_url": "https://image.tmdb.org/t/p/w500/8e6QiSexmYKaiHGPvbhaFMmQEhc.jpg",
         "description": (
             "A team of young superheroes led by Nightwing form to combat evil and other perils."
         ),
@@ -733,7 +733,8 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         {
             "user_id": user.id,
             "preset_id": movie_preset.id,
-            "imdb_id": str(item["imdb_id"]),
+            "media_type": "movie",
+            "tmdb_id": item["tmdb_id"],
             "position": idx,
             "blurb": f"Curated pick #{idx + 1} for Late Night Thrillers.",
         }
@@ -742,7 +743,8 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         {
             "user_id": user.id,
             "preset_id": series_preset.id,
-            "imdb_id": str(item["imdb_id"]),
+            "media_type": "series",
+            "tmdb_id": item["tmdb_id"],
             "position": idx,
             "blurb": f"Curated pick #{idx + 1} for Prestige Sci-Fi.",
         }
@@ -754,7 +756,8 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
     watch_history_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
-            "imdb_id": str(_DEMO_MOVIES[0]["imdb_id"]),  # Se7en - watched, high rating
+            "media_type": "movie",
+            "tmdb_id": _DEMO_MOVIES[0]["tmdb_id"],  # Se7en - watched, high rating
             "status": "watched",
             "rating": 8.5,
             "watched_at": now,
@@ -762,7 +765,8 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         },
         {
             "user_id": user.id,
-            "imdb_id": str(_DEMO_MOVIES[24]["imdb_id"]),  # The Snowman - low-rated
+            "media_type": "movie",
+            "tmdb_id": _DEMO_MOVIES[24]["tmdb_id"],  # The Snowman - low-rated
             "status": "watched",
             "rating": 3.5,
             "watched_at": now,
@@ -770,7 +774,8 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         },
         {
             "user_id": user.id,
-            "imdb_id": str(_DEMO_SERIES[24]["imdb_id"]),  # Titans - dropped series
+            "media_type": "series",
+            "tmdb_id": _DEMO_SERIES[24]["tmdb_id"],  # Titans - dropped series
             "status": "dropped",
             "rating": 4.0,
             "watched_at": now,
@@ -782,12 +787,14 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
     veto_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
-            "imdb_id": str(_DEMO_MOVIES[1]["imdb_id"]),  # Prisoners - seen
+            "media_type": "movie",
+            "tmdb_id": _DEMO_MOVIES[1]["tmdb_id"],  # Prisoners - seen
             "kind": "seen",
         },
         {
             "user_id": user.id,
-            "imdb_id": str(_DEMO_SERIES[21]["imdb_id"]),  # Euphoria - not_for_me
+            "media_type": "series",
+            "tmdb_id": _DEMO_SERIES[21]["tmdb_id"],  # Euphoria - not_for_me
             "kind": "not_for_me",
         },
     ]

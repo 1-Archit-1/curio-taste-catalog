@@ -15,8 +15,24 @@ interface StatusMessage {
   kind: "" | "ok" | "err";
 }
 
-interface RecentVeto {
-  imdb_id: string;
+/** Titles are keyed by TMDB `(media_type, tmdb_id)`; `imdb_id` may be missing. */
+type TitleKey = Pick<CandidateOut, "media_type" | "tmdb_id">;
+
+function sameTitle(a: TitleKey, b: TitleKey): boolean {
+  return a.media_type === b.media_type && a.tmdb_id === b.tmdb_id;
+}
+
+function titleKey(title: TitleKey): string {
+  return `${title.media_type}:${title.tmdb_id}`;
+}
+
+function vetoPath(title: TitleKey) {
+  return {
+    params: { path: { media_type: title.media_type, tmdb_id: title.tmdb_id } },
+  };
+}
+
+interface RecentVeto extends TitleKey {
   name: string;
   kind: VetoKind;
   previousVeto: VetoKind | null;
@@ -252,20 +268,18 @@ export function CatalogsPage() {
     setVetoStatus({ text: "", kind: "" });
     const previousVeto = candidate.veto_kind ?? null;
     const { data, error, response } = await apiClient.PUT(
-      "/api/vetoes/{imdb_id}",
-      {
-        params: { path: { imdb_id: candidate.imdb_id } },
-        body: { kind },
-      },
+      "/api/vetoes/{media_type}/{tmdb_id}",
+      { ...vetoPath(candidate), body: { kind } },
     );
     if (response.ok && data) {
       setCandidates((prev) =>
         prev.map((c) =>
-          c.imdb_id === candidate.imdb_id ? { ...c, veto_kind: data.kind } : c,
+          sameTitle(c, candidate) ? { ...c, veto_kind: data.kind } : c,
         ),
       );
       setLastVeto({
-        imdb_id: candidate.imdb_id,
+        media_type: candidate.media_type,
+        tmdb_id: candidate.tmdb_id,
         name: candidate.name,
         kind: data.kind,
         previousVeto,
@@ -279,25 +293,22 @@ export function CatalogsPage() {
   }
 
   async function handleUndoVeto(
-    imdbId: string,
+    title: TitleKey,
     previousVeto: VetoKind | null = null,
   ) {
     setVetoStatus({ text: "", kind: "" });
     if (previousVeto !== null) {
       const { data, error, response } = await apiClient.PUT(
-        "/api/vetoes/{imdb_id}",
-        {
-          params: { path: { imdb_id: imdbId } },
-          body: { kind: previousVeto },
-        },
+        "/api/vetoes/{media_type}/{tmdb_id}",
+        { ...vetoPath(title), body: { kind: previousVeto } },
       );
       if (response.ok && data) {
         setCandidates((prev) =>
           prev.map((c) =>
-            c.imdb_id === imdbId ? { ...c, veto_kind: data.kind } : c,
+            sameTitle(c, title) ? { ...c, veto_kind: data.kind } : c,
           ),
         );
-        setLastVeto((prev) => (prev?.imdb_id === imdbId ? null : prev));
+        setLastVeto((prev) => (prev && sameTitle(prev, title) ? null : prev));
       } else if (response.status !== 401) {
         setVetoStatus({
           text: extractErrorDetail(error, "Could not restore veto."),
@@ -308,14 +319,14 @@ export function CatalogsPage() {
     }
 
     const { error, response } = await apiClient.DELETE(
-      "/api/vetoes/{imdb_id}",
-      { params: { path: { imdb_id: imdbId } } },
+      "/api/vetoes/{media_type}/{tmdb_id}",
+      vetoPath(title),
     );
     if (response.ok) {
       setCandidates((prev) =>
-        prev.map((c) => (c.imdb_id === imdbId ? { ...c, veto_kind: null } : c)),
+        prev.map((c) => (sameTitle(c, title) ? { ...c, veto_kind: null } : c)),
       );
-      setLastVeto((prev) => (prev?.imdb_id === imdbId ? null : prev));
+      setLastVeto((prev) => (prev && sameTitle(prev, title) ? null : prev));
     } else if (response.status !== 401) {
       setVetoStatus({
         text: extractErrorDetail(error, "Could not remove veto."),
@@ -547,7 +558,7 @@ export function CatalogsPage() {
               className="btn"
               type="button"
               onClick={() =>
-                void handleUndoVeto(lastVeto.imdb_id, lastVeto.previousVeto)
+                void handleUndoVeto(lastVeto, lastVeto.previousVeto)
               }
             >
               Undo
@@ -571,8 +582,8 @@ export function CatalogsPage() {
           <div className={styles.candidateGrid}>
             {candidates.map((candidate) => (
               <article
-                key={candidate.imdb_id}
-                data-imdb-id={candidate.imdb_id}
+                key={titleKey(candidate)}
+                data-title-key={titleKey(candidate)}
                 className={
                   candidate.veto_kind
                     ? `${styles.candidateCard} ${styles.candidateVetoed}`
@@ -625,7 +636,7 @@ export function CatalogsPage() {
                       <button
                         className="btn"
                         type="button"
-                        onClick={() => void handleUndoVeto(candidate.imdb_id)}
+                        onClick={() => void handleUndoVeto(candidate)}
                       >
                         Undo
                       </button>

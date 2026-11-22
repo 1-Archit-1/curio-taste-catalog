@@ -27,7 +27,12 @@ _SLOT_ID_CHECK = (
 
 
 class MediaItem(Base):
-    """Shared catalog metadata for movies and series (no user_id)."""
+    """Shared catalog metadata for movies and series (no user_id).
+
+    Keyed by TMDB `(media_type, tmdb_id)`: TMDB numbers movies and TV separately, and
+    some TMDB titles have no IMDb ID. `imdb_id` is required only to serve a title to
+    Stremio/Nuvio, which addresses items by `tt...` IDs.
+    """
 
     __tablename__ = "media_items"
     __table_args__ = (
@@ -38,14 +43,14 @@ class MediaItem(Base):
         ),
     )
 
-    imdb_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    media_type: Mapped[str] = mapped_column(Text)
+    media_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    imdb_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     name: Mapped[str] = mapped_column(Text)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tmdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
@@ -132,22 +137,26 @@ class CatalogCandidate(Base):
             ondelete="CASCADE",
             name="fk_catalog_candidates_user_preset",
         ),
+        ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_catalog_candidates_media_item",
+        ),
         Index(
             "idx_catalog_candidates_preset_pos",
             "user_id",
             "preset_id",
             "position",
-            "imdb_id",
+            "media_type",
+            "tmdb_id",
         ),
     )
 
     user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     preset_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
-    imdb_id: Mapped[str] = mapped_column(
-        Text,
-        ForeignKey("media_items.imdb_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
+    media_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     blurb: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -169,6 +178,12 @@ class WatchHistory(Base):
             "rating IS NULL OR (rating >= 0 AND rating <= 10)",
             name="watch_history_rating_check",
         ),
+        ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_watch_history_media_item",
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -176,11 +191,8 @@ class WatchHistory(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    imdb_id: Mapped[str] = mapped_column(
-        Text,
-        ForeignKey("media_items.imdb_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
+    media_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     status: Mapped[str] = mapped_column(Text, server_default=text("'watched'"))
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     watched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -204,6 +216,12 @@ class Veto(Base):
             "kind IN ('seen', 'not_for_me')",
             name="vetoes_kind_check",
         ),
+        ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_vetoes_media_item",
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -211,11 +229,8 @@ class Veto(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    imdb_id: Mapped[str] = mapped_column(
-        Text,
-        ForeignKey("media_items.imdb_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
+    media_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

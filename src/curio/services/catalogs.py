@@ -8,16 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from curio.db.models.catalogs import Preset, Veto
 from curio.repositories import catalogs as catalogs_repo
 from curio.repositories.catalogs import (
-    _UNSET,
     FIXED_SLOTS,
     FIXED_SLOTS_BY_ID,
+    UNSET,
     AntiTasteRow,
     CandidateRow,
     CatalogItemRow,
     ExcludedTitleRow,
     SlotDefinition,
     SlotRow,
-    _UnsetType,
+    UnsetType,
 )
 
 VALID_MEDIA_TYPES = frozenset({"movie", "series"})
@@ -26,6 +26,7 @@ VALID_VETO_KINDS = frozenset({"seen", "not_for_me"})
 __all__ = [
     "FIXED_SLOTS",
     "FIXED_SLOTS_BY_ID",
+    "Preset",
     "SlotDefinition",
     "SlotRow",
     "assign_slot",
@@ -127,23 +128,19 @@ async def update_preset(
     *,
     user_id: UUID,
     preset_id: UUID,
-    name: str | _UnsetType = _UNSET,
-    min_rating: float | None | _UnsetType = _UNSET,
-    criteria: str | None | _UnsetType = _UNSET,
+    name: str | UnsetType = UNSET,
+    min_rating: float | None | UnsetType = UNSET,
+    criteria: str | None | UnsetType = UNSET,
 ) -> Preset | None:
-    cleaned_name: str | _UnsetType = _UNSET
-    if not isinstance(name, _UnsetType):
-        if name is None:  # type: ignore[unreachable]
+    if not isinstance(name, UnsetType):
+        name = name.strip()
+        if not name:
             raise ValueError("preset name cannot be empty")
-        cleaned = name.strip()
-        if not cleaned:
-            raise ValueError("preset name cannot be empty")
-        cleaned_name = cleaned
     return await catalogs_repo.update_preset(
         session,
         user_id=user_id,
         preset_id=preset_id,
-        name=cleaned_name,
+        name=name,
         min_rating=min_rating,
         criteria=criteria,
     )
@@ -234,17 +231,19 @@ async def upsert_veto(
     session: AsyncSession,
     *,
     user_id: UUID,
-    imdb_id: str,
+    media_type: str,
+    tmdb_id: int,
     kind: str,
 ) -> Veto:
     if kind not in VALID_VETO_KINDS:
         raise ValueError(f"invalid veto kind '{kind}'")
-    if not await catalogs_repo.media_item_exists(session, imdb_id=imdb_id):
-        raise LookupError(f"media item '{imdb_id}' not found")
+    if not await catalogs_repo.media_item_exists(session, media_type=media_type, tmdb_id=tmdb_id):
+        raise LookupError(f"media item '{media_type}/{tmdb_id}' not found")
     return await catalogs_repo.upsert_veto(
         session,
         user_id=user_id,
-        imdb_id=imdb_id,
+        media_type=media_type,
+        tmdb_id=tmdb_id,
         kind=kind,
     )
 
@@ -253,9 +252,12 @@ async def delete_veto(
     session: AsyncSession,
     *,
     user_id: UUID,
-    imdb_id: str,
+    media_type: str,
+    tmdb_id: int,
 ) -> bool:
-    return await catalogs_repo.delete_veto(session, user_id=user_id, imdb_id=imdb_id)
+    return await catalogs_repo.delete_veto(
+        session, user_id=user_id, media_type=media_type, tmdb_id=tmdb_id
+    )
 
 
 async def list_excluded_titles(

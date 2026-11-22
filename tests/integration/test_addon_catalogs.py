@@ -19,10 +19,16 @@ from curio.services import catalogs as catalogs_service
 from curio.services import users as users_service
 
 
+def _tmdb(imdb_id: str) -> int:
+    """Test titles derive their TMDB ID from the numeric part of their IMDb ID."""
+    return int(imdb_id.removeprefix("tt"))
+
+
 async def _add_media_item(
     session: AsyncSession,
     *,
-    imdb_id: str,
+    imdb_id: str | None,
+    tmdb_id: int | None = None,
     media_type: str = "movie",
     name: str = "Test Title",
     rating: float | None = 8.0,
@@ -30,8 +36,9 @@ async def _add_media_item(
     description: str | None = "Test description.",
 ) -> MediaItem:
     item = MediaItem(
-        imdb_id=imdb_id,
         media_type=media_type,
+        tmdb_id=tmdb_id if tmdb_id is not None else _tmdb(imdb_id or ""),
+        imdb_id=imdb_id,
         name=name,
         rating=rating,
         poster_url=poster_url,
@@ -133,7 +140,8 @@ async def test_catalog_serving_pagination_min_rating_posters_and_errors(
             CatalogCandidate(
                 user_id=user.id,
                 preset_id=preset.id,
-                imdb_id=imdb_id,
+                media_type="movie",
+                tmdb_id=_tmdb(imdb_id),
                 position=idx,
                 blurb=f"Blurb {idx}" if idx == 0 else None,
             )
@@ -152,7 +160,8 @@ async def test_catalog_serving_pagination_min_rating_posters_and_errors(
             CatalogCandidate(
                 user_id=user.id,
                 preset_id=preset.id,
-                imdb_id=imdb_id,
+                media_type="movie",
+                tmdb_id=_tmdb(imdb_id),
                 position=100 + idx,
             )
         )
@@ -230,7 +239,8 @@ async def test_zero_leakage_of_excluded_titles(
             CatalogCandidate(
                 user_id=user.id,
                 preset_id=preset.id,
-                imdb_id=imdb_id,
+                media_type="movie",
+                tmdb_id=_tmdb(imdb_id),
                 position=idx,
             )
         )
@@ -238,16 +248,18 @@ async def test_zero_leakage_of_excluded_titles(
 
     session.add_all(
         [
-            WatchHistory(user_id=user.id, imdb_id="tt8000001", status="watched"),
-            WatchHistory(user_id=user.id, imdb_id="tt8000002", status="dropped"),
-            WatchHistory(user_id=user.id, imdb_id="tt8000005", status="watching"),
+            WatchHistory(user_id=user.id, media_type="movie", tmdb_id=8000001, status="watched"),
+            WatchHistory(user_id=user.id, media_type="movie", tmdb_id=8000002, status="dropped"),
+            WatchHistory(user_id=user.id, media_type="movie", tmdb_id=8000005, status="watching"),
         ]
     )
     await session.flush()
 
-    await catalogs_service.upsert_veto(session, user_id=user.id, imdb_id="tt8000003", kind="seen")
     await catalogs_service.upsert_veto(
-        session, user_id=user.id, imdb_id="tt8000004", kind="not_for_me"
+        session, user_id=user.id, media_type="movie", tmdb_id=8000003, kind="seen"
+    )
+    await catalogs_service.upsert_veto(
+        session, user_id=user.id, media_type="movie", tmdb_id=8000004, kind="not_for_me"
     )
 
     resp = await client.get(f"/{user.addon_token}/catalog/movie/curio_movie_1.json")
@@ -265,31 +277,37 @@ async def test_seen_vs_not_for_me_and_anti_taste_views(session: AsyncSession) ->
     await _add_media_item(session, imdb_id="tt7000003", media_type="movie", name="Low Rated Movie")
     await _add_media_item(session, imdb_id="tt7000004", media_type="series", name="Dropped Series")
 
-    await catalogs_service.upsert_veto(session, user_id=user.id, imdb_id="tt7000001", kind="seen")
     await catalogs_service.upsert_veto(
-        session, user_id=user.id, imdb_id="tt7000002", kind="not_for_me"
+        session, user_id=user.id, media_type="movie", tmdb_id=7000001, kind="seen"
+    )
+    await catalogs_service.upsert_veto(
+        session, user_id=user.id, media_type="movie", tmdb_id=7000002, kind="not_for_me"
     )
     session.add_all(
         [
-            WatchHistory(user_id=user.id, imdb_id="tt7000003", status="watched", rating=4.0),
-            WatchHistory(user_id=user.id, imdb_id="tt7000004", status="dropped", rating=None),
+            WatchHistory(
+                user_id=user.id, media_type="movie", tmdb_id=7000003, status="watched", rating=4.0
+            ),
+            WatchHistory(
+                user_id=user.id, media_type="series", tmdb_id=7000004, status="dropped", rating=None
+            ),
         ]
     )
     await session.flush()
 
     excluded = await catalogs_service.list_excluded_titles(session, user_id=user.id)
-    assert {(e.imdb_id, e.reason) for e in excluded} == {
-        ("tt7000001", "seen"),
-        ("tt7000002", "not_for_me"),
-        ("tt7000003", "watch_history"),
-        ("tt7000004", "watch_history"),
+    assert {(e.media_type, e.tmdb_id, e.reason) for e in excluded} == {
+        ("movie", 7000001, "seen"),
+        ("movie", 7000002, "not_for_me"),
+        ("movie", 7000003, "watch_history"),
+        ("series", 7000004, "watch_history"),
     }
 
     anti_taste = await catalogs_service.list_anti_taste(session, user_id=user.id)
-    assert {(a.imdb_id, a.reason, a.rating) for a in anti_taste} == {
-        ("tt7000002", "not_for_me", None),
-        ("tt7000003", "low_rating", 4.0),
-        ("tt7000004", "dropped_series", None),
+    assert {(a.media_type, a.tmdb_id, a.reason, a.rating) for a in anti_taste} == {
+        ("movie", 7000002, "not_for_me", None),
+        ("movie", 7000003, "low_rating", 4.0),
+        ("series", 7000004, "dropped_series", None),
     }
 
 
@@ -308,14 +326,24 @@ async def test_unveto_preserves_watch_history(
     )
     await _add_media_item(session, imdb_id="tt6000001", media_type="movie", name="Already Watched")
     session.add(
-        CatalogCandidate(user_id=user.id, preset_id=preset.id, imdb_id="tt6000001", position=0)
+        CatalogCandidate(
+            user_id=user.id, preset_id=preset.id, media_type="movie", tmdb_id=6000001, position=0
+        )
     )
-    session.add(WatchHistory(user_id=user.id, imdb_id="tt6000001", status="watched", rating=9.0))
+    session.add(
+        WatchHistory(
+            user_id=user.id, media_type="movie", tmdb_id=6000001, status="watched", rating=9.0
+        )
+    )
     await session.flush()
 
     # Veto and then un-veto the watched title
-    await catalogs_service.upsert_veto(session, user_id=user.id, imdb_id="tt6000001", kind="seen")
-    deleted = await catalogs_service.delete_veto(session, user_id=user.id, imdb_id="tt6000001")
+    await catalogs_service.upsert_veto(
+        session, user_id=user.id, media_type="movie", tmdb_id=6000001, kind="seen"
+    )
+    deleted = await catalogs_service.delete_veto(
+        session, user_id=user.id, media_type="movie", tmdb_id=6000001
+    )
     assert deleted is True
 
     # WatchHistory row must remain untouched
@@ -323,7 +351,8 @@ async def test_unveto_preserves_watch_history(
         await session.execute(
             select(WatchHistory).where(
                 WatchHistory.user_id == user.id,
-                WatchHistory.imdb_id == "tt6000001",
+                WatchHistory.media_type == "movie",
+                WatchHistory.tmdb_id == 6000001,
             )
         )
     ).scalar_one_or_none()
@@ -356,7 +385,8 @@ async def test_service_validation_errors(session: AsyncSession) -> None:
         await catalogs_service.upsert_veto(
             session,
             user_id=user.id,
-            imdb_id="tt0000000",
+            media_type="movie",
+            tmdb_id=0,
             kind="seen",
         )
 
@@ -400,7 +430,7 @@ async def test_control_plane_requires_auth(client: httpx.AsyncClient) -> None:
     assert (
         await client.post("/api/presets", json={"name": "Test", "media_type": "movie"})
     ).status_code == 401
-    assert (await client.put("/api/vetoes/tt0133093", json={"kind": "seen"})).status_code == 401
+    assert (await client.put("/api/vetoes/movie/133093", json={"kind": "seen"})).status_code == 401
 
 
 async def test_control_plane_presets_slots_candidates_vetoes_and_isolation(
@@ -502,14 +532,16 @@ async def test_control_plane_presets_slots_candidates_vetoes_and_isolation(
             CatalogCandidate(
                 user_id=alice.user.id,
                 preset_id=movie_preset_uuid,
-                imdb_id="tt8100001",
+                media_type="movie",
+                tmdb_id=8100001,
                 position=1,
                 blurb="First pick",
             ),
             CatalogCandidate(
                 user_id=alice.user.id,
                 preset_id=movie_preset_uuid,
-                imdb_id="tt8100002",
+                media_type="movie",
+                tmdb_id=8100002,
                 position=2,
                 blurb="Second pick",
             ),
@@ -522,27 +554,28 @@ async def test_control_plane_presets_slots_candidates_vetoes_and_isolation(
     cands = cand_resp.json()["candidates"]
     assert len(cands) == 2
     assert cands[0]["imdb_id"] == "tt8100001"
+    assert cands[0]["tmdb_id"] == 8100001
     assert cands[0]["poster"].endswith("/addon-assets/poster-fallback.svg")
     assert cands[0]["veto_kind"] is None
     assert cands[1]["poster"] == "https://image.tmdb.org/t/p/w500/real.jpg"
 
     # Veto & Undo
-    assert (await client.put("/api/vetoes/tt0000000", json={"kind": "seen"})).status_code == 404
+    assert (await client.put("/api/vetoes/movie/0", json={"kind": "seen"})).status_code == 404
 
-    veto_resp = await client.put("/api/vetoes/tt8100001", json={"kind": "seen"})
+    veto_resp = await client.put("/api/vetoes/movie/8100001", json={"kind": "seen"})
     assert veto_resp.status_code == 200
-    assert veto_resp.json() == {"imdb_id": "tt8100001", "kind": "seen"}
+    assert veto_resp.json() == {"media_type": "movie", "tmdb_id": 8100001, "kind": "seen"}
 
     cands_after_veto = (await client.get(f"/api/presets/{movie_preset['id']}/candidates")).json()[
         "candidates"
     ]
     assert cands_after_veto[0]["veto_kind"] == "seen"
 
-    del_veto_resp = await client.delete("/api/vetoes/tt8100001")
+    del_veto_resp = await client.delete("/api/vetoes/movie/8100001")
     assert del_veto_resp.status_code == 200
     assert del_veto_resp.json() == {"message": "Veto removed."}
     # Idempotent delete
-    assert (await client.delete("/api/vetoes/tt8100001")).status_code == 200
+    assert (await client.delete("/api/vetoes/movie/8100001")).status_code == 200
 
     cands_after_undo = (await client.get(f"/api/presets/{movie_preset['id']}/candidates")).json()[
         "candidates"
@@ -645,3 +678,99 @@ async def test_patch_preset_partial_update_preserves_omitted_fields(
     assert cleared["name"] == "Renamed"
     assert cleared["min_rating"] is None
     assert cleared["criteria"] is None
+
+
+async def test_titles_are_keyed_by_tmdb_and_imdb_is_only_needed_to_serve(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+) -> None:
+    provisioned = await users_service.create_user_with_login_token(session, username="tmdb_key_u")
+    user = provisioned.user
+    movies = await catalogs_service.create_preset(
+        session, user_id=user.id, name="Movies", media_type="movie"
+    )
+    series = await catalogs_service.create_preset(
+        session, user_id=user.id, name="Series", media_type="series"
+    )
+    await catalogs_service.assign_slot(
+        session, user_id=user.id, slot_id="curio_movie_1", preset_id=movies.id
+    )
+    await catalogs_service.assign_slot(
+        session, user_id=user.id, slot_id="curio_series_1", preset_id=series.id
+    )
+
+    # TMDB numbers movies and TV separately: movie 4242 and series 4242 are different titles.
+    await _add_media_item(
+        session, imdb_id="tt5100001", tmdb_id=4242, media_type="movie", name="Movie 4242"
+    )
+    await _add_media_item(
+        session, imdb_id="tt5100002", tmdb_id=4242, media_type="series", name="Series 4242"
+    )
+    # A TMDB title with no IMDb ID.
+    await _add_media_item(
+        session, imdb_id=None, tmdb_id=4343, media_type="movie", name="No IMDb Movie"
+    )
+    session.add_all(
+        [
+            CatalogCandidate(
+                user_id=user.id, preset_id=movies.id, media_type="movie", tmdb_id=4242, position=0
+            ),
+            CatalogCandidate(
+                user_id=user.id, preset_id=movies.id, media_type="movie", tmdb_id=4343, position=1
+            ),
+            CatalogCandidate(
+                user_id=user.id, preset_id=series.id, media_type="series", tmdb_id=4242, position=0
+            ),
+        ]
+    )
+    await session.flush()
+
+    # Titles without an IMDb ID are never served to Nuvio...
+    movie_metas = (
+        await client.get(f"/{user.addon_token}/catalog/movie/curio_movie_1.json")
+    ).json()["metas"]
+    assert [m["id"] for m in movie_metas] == ["tt5100001"]
+
+    # ...but still appear as candidates in the control plane and can be vetoed.
+    await _login(client, provisioned.login_token)
+    cands = (await client.get(f"/api/presets/{movies.id}/candidates")).json()["candidates"]
+    assert [(c["tmdb_id"], c["imdb_id"]) for c in cands] == [(4242, "tt5100001"), (4343, None)]
+    assert (
+        await client.put("/api/vetoes/movie/4343", json={"kind": "not_for_me"})
+    ).status_code == 200
+
+    # Vetoing movie 4242 leaves series 4242 untouched.
+    assert (await client.put("/api/vetoes/movie/4242", json={"kind": "seen"})).status_code == 200
+    movie_metas = (
+        await client.get(f"/{user.addon_token}/catalog/movie/curio_movie_1.json")
+    ).json()["metas"]
+    series_metas = (
+        await client.get(f"/{user.addon_token}/catalog/series/curio_series_1.json")
+    ).json()["metas"]
+    assert movie_metas == []
+    assert [m["id"] for m in series_metas] == ["tt5100002"]
+
+    excluded = await catalogs_service.list_excluded_titles(session, user_id=user.id)
+    assert {(e.media_type, e.tmdb_id, e.reason) for e in excluded} == {
+        ("movie", 4242, "seen"),
+        ("movie", 4343, "not_for_me"),
+    }
+
+    # Unknown media type in the veto path is rejected by validation.
+    assert (await client.put("/api/vetoes/anime/4242", json={"kind": "seen"})).status_code == 422
+
+
+async def test_patch_preset_rejects_null_name(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+) -> None:
+    provisioned = await users_service.create_user_with_login_token(session, username="null_name_u")
+    await _login(client, provisioned.login_token)
+    preset_id = (
+        await client.post("/api/presets", json={"name": "Keep Me", "media_type": "movie"})
+    ).json()["id"]
+
+    assert (await client.patch(f"/api/presets/{preset_id}", json={"name": None})).status_code == 422
+    assert (await client.patch(f"/api/presets/{preset_id}", json={"name": "  "})).status_code == 422
+    presets = (await client.get("/api/presets")).json()["presets"]
+    assert presets[0]["name"] == "Keep Me"

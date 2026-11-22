@@ -27,7 +27,13 @@ def test_catalog_models_registered_in_metadata() -> None:
 
 def test_media_items_is_shared_and_per_user_tables_include_user_id_in_pk() -> None:
     assert "user_id" not in MediaItem.__table__.columns
-    assert [col.name for col in MediaItem.__table__.primary_key] == ["imdb_id"]
+    assert [col.name for col in MediaItem.__table__.primary_key] == ["media_type", "tmdb_id"]
+    assert MediaItem.__table__.c.imdb_id.nullable
+    assert MediaItem.__table__.c.imdb_id.unique
+
+    for model in (CatalogCandidate, WatchHistory, Veto):
+        pk_cols = [col.name for col in model.__table__.primary_key]
+        assert pk_cols[-2:] == ["media_type", "tmdb_id"], model.__tablename__
 
     per_user_models = (Preset, Slot, CatalogCandidate, WatchHistory, Veto)
     for model in per_user_models:
@@ -48,6 +54,11 @@ def test_demo_seed_catalog_invariants() -> None:
     imdb_ids = [str(item["imdb_id"]) for item in all_items]
     assert len(imdb_ids) == len(set(imdb_ids))
     assert all(imdb_id.startswith("tt") for imdb_id in imdb_ids)
+
+    for items in (_DEMO_MOVIES, _DEMO_SERIES):
+        tmdb_ids = [item["tmdb_id"] for item in items]
+        assert all(isinstance(tmdb_id, int) for tmdb_id in tmdb_ids)
+        assert len(tmdb_ids) == len(set(tmdb_ids))
 
     ratings = [float(item["rating"]) for item in all_items]  # type: ignore[arg-type]
     assert all(4.0 <= r <= 9.0 for r in ratings)

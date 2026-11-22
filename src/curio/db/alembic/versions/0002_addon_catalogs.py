@@ -19,14 +19,14 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "media_items",
-        sa.Column("imdb_id", sa.Text(), nullable=False),
         sa.Column("media_type", sa.Text(), nullable=False),
+        sa.Column("tmdb_id", sa.Integer(), nullable=False),
+        sa.Column("imdb_id", sa.Text(), nullable=True),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("year", sa.Integer(), nullable=True),
         sa.Column("poster_url", sa.Text(), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("rating", sa.Float(), nullable=True),
-        sa.Column("tmdb_id", sa.Integer(), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -47,7 +47,8 @@ def upgrade() -> None:
             "rating IS NULL OR (rating >= 0 AND rating <= 10)",
             name="media_items_rating_check",
         ),
-        sa.PrimaryKeyConstraint("imdb_id"),
+        sa.PrimaryKeyConstraint("media_type", "tmdb_id"),
+        sa.UniqueConstraint("imdb_id"),
     )
 
     op.create_table(
@@ -117,7 +118,8 @@ def upgrade() -> None:
         "catalog_candidates",
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("preset_id", sa.Uuid(), nullable=False),
-        sa.Column("imdb_id", sa.Text(), nullable=False),
+        sa.Column("media_type", sa.Text(), nullable=False),
+        sa.Column("tmdb_id", sa.Integer(), nullable=False),
         sa.Column("position", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("blurb", sa.Text(), nullable=True),
         sa.Column(
@@ -126,26 +128,32 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(["imdb_id"], ["media_items.imdb_id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_catalog_candidates_media_item",
+        ),
         sa.ForeignKeyConstraint(
             ["user_id", "preset_id"],
             ["presets.user_id", "presets.id"],
             ondelete="CASCADE",
             name="fk_catalog_candidates_user_preset",
         ),
-        sa.PrimaryKeyConstraint("user_id", "preset_id", "imdb_id"),
+        sa.PrimaryKeyConstraint("user_id", "preset_id", "media_type", "tmdb_id"),
     )
     op.create_index(
         "idx_catalog_candidates_preset_pos",
         "catalog_candidates",
-        ["user_id", "preset_id", "position", "imdb_id"],
+        ["user_id", "preset_id", "position", "media_type", "tmdb_id"],
         unique=False,
     )
 
     op.create_table(
         "watch_history",
         sa.Column("user_id", sa.Uuid(), nullable=False),
-        sa.Column("imdb_id", sa.Text(), nullable=False),
+        sa.Column("media_type", sa.Text(), nullable=False),
+        sa.Column("tmdb_id", sa.Integer(), nullable=False),
         sa.Column("status", sa.Text(), server_default=sa.text("'watched'"), nullable=False),
         sa.Column("rating", sa.Float(), nullable=True),
         sa.Column("watched_at", sa.DateTime(timezone=True), nullable=True),
@@ -170,15 +178,21 @@ def upgrade() -> None:
             "rating IS NULL OR (rating >= 0 AND rating <= 10)",
             name="watch_history_rating_check",
         ),
-        sa.ForeignKeyConstraint(["imdb_id"], ["media_items.imdb_id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_watch_history_media_item",
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("user_id", "imdb_id"),
+        sa.PrimaryKeyConstraint("user_id", "media_type", "tmdb_id"),
     )
 
     op.create_table(
         "vetoes",
         sa.Column("user_id", sa.Uuid(), nullable=False),
-        sa.Column("imdb_id", sa.Text(), nullable=False),
+        sa.Column("media_type", sa.Text(), nullable=False),
+        sa.Column("tmdb_id", sa.Integer(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column(
             "created_at",
@@ -196,19 +210,24 @@ def upgrade() -> None:
             "kind IN ('seen', 'not_for_me')",
             name="vetoes_kind_check",
         ),
-        sa.ForeignKeyConstraint(["imdb_id"], ["media_items.imdb_id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["media_type", "tmdb_id"],
+            ["media_items.media_type", "media_items.tmdb_id"],
+            ondelete="CASCADE",
+            name="fk_vetoes_media_item",
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("user_id", "imdb_id"),
+        sa.PrimaryKeyConstraint("user_id", "media_type", "tmdb_id"),
     )
 
     op.execute(
         """
         CREATE VIEW excluded_titles AS
-        SELECT user_id, imdb_id, 'watch_history'::text AS reason
+        SELECT user_id, media_type, tmdb_id, 'watch_history'::text AS reason
         FROM watch_history
         WHERE status IN ('watched', 'dropped')
         UNION
-        SELECT user_id, imdb_id, kind AS reason
+        SELECT user_id, media_type, tmdb_id, kind AS reason
         FROM vetoes
         """
     )
@@ -217,16 +236,16 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE VIEW anti_taste AS
-        SELECT w.user_id, w.imdb_id, 'low_rating'::text AS reason, w.rating
+        SELECT w.user_id, w.media_type, w.tmdb_id, 'low_rating'::text AS reason, w.rating
         FROM watch_history w
         WHERE w.rating IS NOT NULL AND w.rating <= 5.0
         UNION ALL
-        SELECT w.user_id, w.imdb_id, 'dropped_series'::text AS reason, w.rating
+        SELECT w.user_id, w.media_type, w.tmdb_id, 'dropped_series'::text AS reason, w.rating
         FROM watch_history w
-        JOIN media_items m ON m.imdb_id = w.imdb_id
-        WHERE w.status = 'dropped' AND m.media_type = 'series'
+        WHERE w.status = 'dropped' AND w.media_type = 'series'
         UNION ALL
-        SELECT v.user_id, v.imdb_id, 'not_for_me'::text AS reason, NULL::double precision AS rating
+        SELECT v.user_id, v.media_type, v.tmdb_id, 'not_for_me'::text AS reason,
+               NULL::double precision AS rating
         FROM vetoes v
         WHERE v.kind = 'not_for_me'
         """

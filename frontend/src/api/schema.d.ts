@@ -229,7 +229,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/vetoes/{imdb_id}": {
+    "/api/vetoes/{media_type}/{tmdb_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -238,10 +238,10 @@ export interface paths {
         };
         get?: never;
         /** Upsert Veto */
-        put: operations["upsert_veto_api_vetoes__imdb_id__put"];
+        put: operations["upsert_veto_api_vetoes__media_type___tmdb_id__put"];
         post?: never;
         /** Delete Veto */
-        delete: operations["delete_veto_api_vetoes__imdb_id__delete"];
+        delete: operations["delete_veto_api_vetoes__media_type___tmdb_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -293,7 +293,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Imdb Id */
-            imdb_id: string;
+            imdb_id?: string | null;
             /**
              * Media Type
              * @enum {string}
@@ -307,6 +307,8 @@ export interface components {
             poster: string;
             /** Rating */
             rating?: number | null;
+            /** Tmdb Id */
+            tmdb_id: number;
             /** Veto Kind */
             veto_kind?: ("seen" | "not_for_me") | null;
             /** Watch Status */
@@ -430,14 +432,17 @@ export interface components {
              */
             updated_at: string;
         };
-        /** PresetUpdateRequest */
+        /**
+         * PresetUpdateRequest
+         * @description Partial update: omitted fields are left unchanged; `null` clears a nullable field.
+         */
         PresetUpdateRequest: {
             /** Criteria */
             criteria?: string | null;
             /** Min Rating */
             min_rating?: number | null;
             /** Name */
-            name?: string | null;
+            name?: string;
         };
         /** RotateAddonTokenResponse */
         RotateAddonTokenResponse: {
@@ -524,13 +529,18 @@ export interface components {
         };
         /** VetoOut */
         VetoOut: {
-            /** Imdb Id */
-            imdb_id: string;
             /**
              * Kind
              * @enum {string}
              */
             kind: "seen" | "not_for_me";
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Tmdb Id */
+            tmdb_id: number;
         };
         /** VetoRequest */
         VetoRequest: {
@@ -1032,12 +1042,13 @@ export interface operations {
             };
         };
     };
-    upsert_veto_api_vetoes__imdb_id__put: {
+    upsert_veto_api_vetoes__media_type___tmdb_id__put: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                imdb_id: string;
+                media_type: "movie" | "series";
+                tmdb_id: number;
             };
             cookie?: never;
         };
@@ -1067,12 +1078,13 @@ export interface operations {
             };
         };
     };
-    delete_veto_api_vetoes__imdb_id__delete: {
+    delete_veto_api_vetoes__media_type___tmdb_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                imdb_id: string;
+                media_type: "movie" | "series";
+                tmdb_id: number;
             };
             cookie?: never;
         };

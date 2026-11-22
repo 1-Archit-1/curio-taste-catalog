@@ -17,6 +17,12 @@ function jsonResponse({ status = 200, body }: MockResponseInit): Response {
   });
 }
 
+/** Parse `/api/vetoes/{media_type}/{tmdb_id}` into its title key. */
+function vetoTitle(pathname: string): ["movie" | "series", number] {
+  const [, , , mediaType, tmdbId] = pathname.split("/");
+  return [mediaType as "movie" | "series", Number(tmdbId)];
+}
+
 function renderCatalogsApp() {
   return render(
     <MemoryRouter initialEntries={["/catalogs"]}>
@@ -118,8 +124,9 @@ describe("CatalogsPage", () => {
     const candidatesByPreset: Record<
       string,
       Array<{
-        imdb_id: string;
         media_type: "movie" | "series";
+        tmdb_id: number;
+        imdb_id: string | null;
         name: string;
         year: number | null;
         poster: string;
@@ -133,8 +140,9 @@ describe("CatalogsPage", () => {
     > = {
       "11111111-1111-1111-1111-111111111111": [
         {
-          imdb_id: "tt0133093",
           media_type: "movie",
+          tmdb_id: 603,
+          imdb_id: "tt0133093",
           name: "The Matrix",
           year: 1999,
           poster: "https://image.tmdb.org/t/p/w500/matrix.jpg",
@@ -146,8 +154,9 @@ describe("CatalogsPage", () => {
           veto_kind: null,
         },
         {
-          imdb_id: "tt0083658",
           media_type: "movie",
+          tmdb_id: 78,
+          imdb_id: "tt0083658",
           name: "Blade Runner",
           year: 1982,
           poster: "https://image.tmdb.org/t/p/w500/blade.jpg",
@@ -272,25 +281,27 @@ describe("CatalogsPage", () => {
         return jsonResponse({ body: { message: "Preset deleted." } });
       }
       if (pathname.startsWith("/api/vetoes/") && method === "PUT") {
-        const imdbId = pathname.split("/").pop() ?? "";
+        const [mediaType, tmdbId] = vetoTitle(pathname);
         const body = await readBody();
         vetoRequests.push({ method, pathname, body });
         const kind = body.kind as "seen" | "not_for_me";
         for (const list of Object.values(candidatesByPreset)) {
           for (const item of list) {
-            if (item.imdb_id === imdbId) {
+            if (item.media_type === mediaType && item.tmdb_id === tmdbId) {
               item.veto_kind = kind;
             }
           }
         }
-        return jsonResponse({ body: { imdb_id: imdbId, kind } });
+        return jsonResponse({
+          body: { media_type: mediaType, tmdb_id: tmdbId, kind },
+        });
       }
       if (pathname.startsWith("/api/vetoes/") && method === "DELETE") {
-        const imdbId = pathname.split("/").pop() ?? "";
+        const [mediaType, tmdbId] = vetoTitle(pathname);
         vetoRequests.push({ method, pathname });
         for (const list of Object.values(candidatesByPreset)) {
           for (const item of list) {
-            if (item.imdb_id === imdbId) {
+            if (item.media_type === mediaType && item.tmdb_id === tmdbId) {
               item.veto_kind = null;
             }
           }
@@ -344,7 +355,7 @@ describe("CatalogsPage", () => {
     // Veto "The Matrix" as Seen, then Undo via the undo banner (null -> seen -> DELETE).
     const matrixCard = screen
       .getByText("The Matrix")
-      .closest<HTMLElement>("[data-imdb-id='tt0133093']");
+      .closest<HTMLElement>("[data-title-key='movie:603']");
     if (!matrixCard) throw new Error("Matrix card not found");
 
     await user.click(within(matrixCard).getByRole("button", { name: "Seen" }));
@@ -361,10 +372,10 @@ describe("CatalogsPage", () => {
     expect(vetoRequests).toEqual([
       {
         method: "PUT",
-        pathname: "/api/vetoes/tt0133093",
+        pathname: "/api/vetoes/movie/603",
         body: { kind: "seen" },
       },
-      { method: "DELETE", pathname: "/api/vetoes/tt0133093" },
+      { method: "DELETE", pathname: "/api/vetoes/movie/603" },
     ]);
 
     // Change an existing veto (seen -> not_for_me -> Undo restores PUT seen).
@@ -397,17 +408,17 @@ describe("CatalogsPage", () => {
     expect(vetoRequests).toEqual([
       {
         method: "PUT",
-        pathname: "/api/vetoes/tt0133093",
+        pathname: "/api/vetoes/movie/603",
         body: { kind: "seen" },
       },
       {
         method: "PUT",
-        pathname: "/api/vetoes/tt0133093",
+        pathname: "/api/vetoes/movie/603",
         body: { kind: "not_for_me" },
       },
       {
         method: "PUT",
-        pathname: "/api/vetoes/tt0133093",
+        pathname: "/api/vetoes/movie/603",
         body: { kind: "seen" },
       },
     ]);
@@ -415,7 +426,7 @@ describe("CatalogsPage", () => {
     // Veto "Blade Runner" as Not for me, then Undo via the card's Undo button.
     const bladeCard = screen
       .getByText("Blade Runner")
-      .closest<HTMLElement>("[data-imdb-id='tt0083658']");
+      .closest<HTMLElement>("[data-title-key='movie:78']");
     if (!bladeCard) throw new Error("Blade Runner card not found");
 
     await user.click(
