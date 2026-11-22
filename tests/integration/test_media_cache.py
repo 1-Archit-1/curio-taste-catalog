@@ -90,6 +90,7 @@ async def test_hydrate_persists_movie_and_series_metadata(session, tmdb, tmdb_ro
     assert movie.original_language == "en"
     assert movie.runtime == 136
     assert movie.release_date == date(1999, 3, 31)
+    assert (movie.collection_id, movie.collection_name) == (2344, "The Matrix Collection")
     assert movie.rating == 8.3
     assert series.genre_ids == [18, 80]
     assert series.keyword_ids[:3] == [1508, 2231, 5857]
@@ -97,6 +98,7 @@ async def test_hydrate_persists_movie_and_series_metadata(session, tmdb, tmdb_ro
     assert series.original_language == "en"
     assert series.runtime is None  # the recorded response has an empty episode_run_time
     assert series.release_date == date(2008, 1, 20)
+    assert series.collection_id is None
     assert series.year == 2008
 
 
@@ -137,6 +139,8 @@ async def test_second_upsert_refreshes_new_columns(session):
         original_language="en",
         runtime=120,
         release_date=date(1999, 3, 31),
+        collection_id=2344,
+        collection_name="The Matrix Collection",
     )
     item = await media_repo.upsert_hydrated(
         session,
@@ -148,12 +152,15 @@ async def test_second_upsert_refreshes_new_columns(session):
         original_language="fr",
         runtime=None,
         release_date=None,
+        collection_id=None,
+        collection_name=None,
     )
     await session.refresh(item)
     assert item.genre_ids == [28, 878]
     assert item.keyword_ids == [4565, 310]
     assert (item.vote_count, item.popularity, item.original_language) == (250, 2.5, "fr")
     assert (item.runtime, item.release_date) == (None, None)
+    assert (item.collection_id, item.collection_name) == (None, None)
 
 
 async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(session, tmdb, tmdb_routes):
