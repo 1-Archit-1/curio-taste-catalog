@@ -1,6 +1,6 @@
 # 2. Per-user API keys
 
-Status: Accepted
+Status: Accepted. The pause scope in §5 is narrowed by [ADR 0008](0008-preset-prompts-compile-to-recipes.md).
 
 ## Context
 

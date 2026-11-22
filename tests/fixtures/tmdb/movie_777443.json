@@ -1,0 +1,382 @@
+{
+  "adult": false,
+  "backdrop_path": "/2n7lYEeIbucsEQCswRcVB6ZYmMP.jpg",
+  "belongs_to_collection": null,
+  "budget": 320000000,
+  "genres": [
+    {
+      "id": 28,
+      "name": "Action"
+    },
+    {
+      "id": 12,
+      "name": "Adventure"
+    },
+    {
+      "id": 878,
+      "name": "Science Fiction"
+    }
+  ],
+  "homepage": "https://www.netflix.com/title/81601562",
+  "id": 777443,
+  "imdb_id": "tt7766378",
+  "origin_country": [
+    "US"
+  ],
+  "original_language": "en",
+  "original_title": "The Electric State",
+  "overview": "An orphaned teen hits the road with a mysterious robot to find her long-lost brother, teaming up with a smuggler and his wisecracking sidekick.",
+  "popularity": 6.8818,
+  "poster_path": "/sI2NiMU8o65hmIMY0JI9CjJ0p7f.jpg",
+  "production_companies": [
+    {
+      "id": 106544,
+      "logo_path": "/psd84iF7PTGrKf4yFOStKj8JbAh.png",
+      "name": "AGBO",
+      "origin_country": "US"
+    },
+    {
+      "id": 50032,
+      "logo_path": "/ojrMksdtR7Bs2vwERU1LCrjv7vx.png",
+      "name": "Skybound Entertainment",
+      "origin_country": "US"
+    }
+  ],
+  "production_countries": [
+    {
+      "iso_3166_1": "US",
+      "name": "United States of America"
+    }
+  ],
+  "release_date": "2025-02-24",
+  "revenue": 0,
+  "runtime": 125,
+  "softcore": false,
+  "spoken_languages": [
+    {
+      "english_name": "English",
+      "iso_639_1": "en",
+      "name": "English"
+    }
+  ],
+  "status": "Released",
+  "tagline": "Rage with the machines.",
+  "title": "The Electric State",
+  "video": false,
+  "vote_average": 6.462,
+  "vote_count": 1894,
+  "external_ids": {
+    "imdb_id": "tt7766378",
+    "wikidata_id": "Q114492769",
+    "facebook_id": null,
+    "instagram_id": null,
+    "twitter_id": null
+  },
+  "keywords": {
+    "keywords": [
+      {
+        "id": 312,
+        "name": "man vs machine"
+      },
+      {
+        "id": 310,
+        "name": "artificial intelligence (a.i.)"
+      },
+      {
+        "id": 818,
+        "name": "based on novel or book"
+      },
+      {
+        "id": 14544,
+        "name": "robot"
+      },
+      {
+        "id": 210608,
+        "name": "1990s"
+      },
+      {
+        "id": 257258,
+        "name": "quest for identity"
+      },
+      {
+        "id": 293412,
+        "name": "young"
+      },
+      {
+        "id": 307177,
+        "name": "missing brother"
+      },
+      {
+        "id": 322268,
+        "name": "comedy"
+      },
+      {
+        "id": 372756,
+        "name": "retro‑futuristic world"
+      },
+      {
+        "id": 372757,
+        "name": "post‑war dystopia"
+      },
+      {
+        "id": 372758,
+        "name": "technological ruins"
+      },
+      {
+        "id": 372759,
+        "name": "technology fallout"
+      },
+      {
+        "id": 372760,
+        "name": "emotional sci‑fi"
+      },
+      {
+        "id": 374252,
+        "name": "search for family"
+      },
+      {
+        "id": 374253,
+        "name": "survival journey"
+      }
+    ]
+  },
+  "credits": {
+    "cast": [
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 1356210,
+        "known_for_department": "Acting",
+        "name": "Millie Bobby Brown",
+        "original_name": "Millie Bobby Brown",
+        "popularity": 5.9761,
+        "profile_path": "/7dTkMQCAX8Fi4DuNTmyLrbZUUie.jpg",
+        "cast_id": 1,
+        "character": "Michelle",
+        "credit_id": "5fdd0ea87ef381003da70db8",
+        "order": 0
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 73457,
+        "known_for_department": "Acting",
+        "name": "Chris Pratt",
+        "original_name": "Chris Pratt",
+        "popularity": 5.9209,
+        "profile_path": "/cRH6HPAQ98PlOwwEvhYO4CM9lwu.jpg",
+        "cast_id": 14,
+        "character": "Keats",
+        "credit_id": "62f52b1ec3bffe0087766cdb",
+        "order": 1
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 690,
+        "known_for_department": "Acting",
+        "name": "Ke Huy Quan",
+        "original_name": "Ke Huy Quan",
+        "popularity": 2.6749,
+        "profile_path": "/iestHyn7PLuVowj5Jaa1SGPboQ4.jpg",
+        "cast_id": 23,
+        "character": "Dr. Amherst / P.C (voice)",
+        "credit_id": "6362a11185867800828a1750",
+        "order": 2
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 1206,
+        "known_for_department": "Acting",
+        "name": "Jason Alexander",
+        "original_name": "Jason Alexander",
+        "popularity": 1.9893,
+        "profile_path": "/qRezZ2yhM2bmBERt7jVcxo8RVSA.jpg",
+        "cast_id": 17,
+        "character": "Ted / Wingman",
+        "credit_id": "62f52b3c7a97ab007b945257",
+        "order": 3
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 1945369,
+        "known_for_department": "Acting",
+        "name": "Woody Norman",
+        "original_name": "Woody Norman",
+        "popularity": 0.8009,
+        "profile_path": "/jQlx4bAGAmQfvzEuXw6A9cEmb95.jpg",
+        "cast_id": 21,
+        "character": "Christopher",
+        "credit_id": "63570bb943cd54007a7e3a1e",
+        "order": 4
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 4808,
+        "known_for_department": "Acting",
+        "name": "Giancarlo Esposito",
+        "original_name": "Giancarlo Esposito",
+        "popularity": 3.6331,
+        "profile_path": "/MJOo4QZgMAb3y8QzOUDVFQusQZ.jpg",
+        "cast_id": 22,
+        "character": "Colonel Bradbury / The Marshall",
+        "credit_id": "6362a1098289a0007959d248",
+        "order": 5
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2283,
+        "known_for_department": "Acting",
+        "name": "Stanley Tucci",
+        "original_name": "Stanley Tucci",
+        "popularity": 4.667,
+        "profile_path": "/q4TanMDI5Rgsvw4SfyNbPBh4URr.jpg",
+        "cast_id": 16,
+        "character": "Ethan Skate",
+        "credit_id": "62f52b3066a0d3007f177877",
+        "order": 6
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 57755,
+        "known_for_department": "Acting",
+        "name": "Woody Harrelson",
+        "original_name": "Woody Harrelson",
+        "popularity": 5.1975,
+        "profile_path": "/igxYDQBbTEdAqaJxaW6ffqswmUU.jpg",
+        "cast_id": 72,
+        "character": "Mr. Peanut (voice)",
+        "credit_id": "66bbe4cb60e4b9baca663cca",
+        "order": 7
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 53650,
+        "known_for_department": "Acting",
+        "name": "Anthony Mackie",
+        "original_name": "Anthony Mackie",
+        "popularity": 4.5726,
+        "profile_path": "/vecvTm7SimizluJkyIwBxeLbvRm.jpg",
+        "cast_id": 24,
+        "character": "Herman (voice)",
+        "credit_id": "6362a11aa6a4c10082da8dd1",
+        "order": 8
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 1248,
+        "known_for_department": "Acting",
+        "name": "Brian Cox",
+        "original_name": "Brian Cox",
+        "popularity": 3.994,
+        "profile_path": "/scSjbFCTRngXlkJRoKptM5kQGw7.jpg",
+        "cast_id": 18,
+        "character": "Popfly (voice)",
+        "credit_id": "62f52b44d2f5b5007d929de0",
+        "order": 9
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 213001,
+        "known_for_department": "Acting",
+        "name": "Jenny Slate",
+        "original_name": "Jenny Slate",
+        "popularity": 2.4171,
+        "profile_path": "/mMxsNO6r966ut0sordYzj2iDOb6.jpg",
+        "cast_id": 19,
+        "character": "Penny Pal (voice)",
+        "credit_id": "62f52b4b1f748b0081174976",
+        "order": 10
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 5587,
+        "known_for_department": "Acting",
+        "name": "Hank Azaria",
+        "original_name": "Hank Azaria",
+        "popularity": 2.183,
+        "profile_path": "/yFDw4b0jucuFWNnGcBPfpYUtn16.jpg",
+        "cast_id": 104,
+        "character": "Perplexo (voice)",
+        "credit_id": "676619c203a3aa533090eb1e",
+        "order": 11
+      }
+    ],
+    "crew": [
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 19272,
+        "known_for_department": "Directing",
+        "name": "Joe Russo",
+        "original_name": "Joe Russo",
+        "popularity": 1.81,
+        "profile_path": "/o0OXjFzL10jCy89iAs7UzzSbyoK.jpg",
+        "credit_id": "5fdd0ebb498bc2003f45dd4f",
+        "department": "Directing",
+        "job": "Director"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 19271,
+        "known_for_department": "Directing",
+        "name": "Anthony Russo",
+        "original_name": "Anthony Russo",
+        "popularity": 2.0286,
+        "profile_path": "/xbINBnWn28YygYWUJ1aSAw0xPRv.jpg",
+        "credit_id": "5fdd0ecaa84a47003d8ee70e",
+        "department": "Directing",
+        "job": "Director"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 1405917,
+        "known_for_department": "Production",
+        "name": "Mike Larocca",
+        "original_name": "Mike Larocca",
+        "popularity": 0.2285,
+        "profile_path": "/rGM3x60aOk0jtl9XaTAbQaIGg4V.jpg",
+        "credit_id": "607a8e46746457006e90da30",
+        "department": "Production",
+        "job": "Producer"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 19271,
+        "known_for_department": "Directing",
+        "name": "Anthony Russo",
+        "original_name": "Anthony Russo",
+        "popularity": 2.0286,
+        "profile_path": "/xbINBnWn28YygYWUJ1aSAw0xPRv.jpg",
+        "credit_id": "607a8e3543d9b10057d8168e",
+        "department": "Production",
+        "job": "Producer"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 19272,
+        "known_for_department": "Directing",
+        "name": "Joe Russo",
+        "original_name": "Joe Russo",
+        "popularity": 1.81,
+        "profile_path": "/o0OXjFzL10jCy89iAs7UzzSbyoK.jpg",
+        "credit_id": "607a8e29f48e0d0029f8e06d",
+        "department": "Production",
+        "job": "Producer"
+      }
+    ]
+  }
+}

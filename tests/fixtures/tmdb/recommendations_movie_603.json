@@ -1,0 +1,51 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/wvlIoof1FnKPLv9jAYanuP31V0C.jpg",
+      "genre_ids": [
+        878,
+        28,
+        53
+      ],
+      "id": 87101,
+      "title": "Terminator Genisys",
+      "original_language": "en",
+      "original_title": "Terminator Genisys",
+      "overview": "The year is 2029. John Connor, leader of the resistance continues the war against the machines. At the Los Angeles offensive, John's fears of the unknown future begin to emerge when TECOM spies reveal a new plot by SkyNet that will attack him from both fronts; past and future, and will ultimately change warfare forever.",
+      "popularity": 11.7792,
+      "poster_path": "/oZRVDpNtmHk8M1VYy1aeOWUXgbC.jpg",
+      "release_date": "2015-06-23",
+      "softcore": false,
+      "video": false,
+      "vote_average": 5.965,
+      "vote_count": 9318,
+      "media_type": "movie"
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/2n7lYEeIbucsEQCswRcVB6ZYmMP.jpg",
+      "genre_ids": [
+        28,
+        12,
+        878
+      ],
+      "id": 777443,
+      "title": "The Electric State",
+      "original_language": "en",
+      "original_title": "The Electric State",
+      "overview": "An orphaned teen hits the road with a mysterious robot to find her long-lost brother, teaming up with a smuggler and his wisecracking sidekick.",
+      "popularity": 6.8818,
+      "poster_path": "/sI2NiMU8o65hmIMY0JI9CjJ0p7f.jpg",
+      "release_date": "2025-02-24",
+      "softcore": false,
+      "video": false,
+      "vote_average": 6.462,
+      "vote_count": 1894,
+      "media_type": "movie"
+    }
+  ],
+  "total_pages": 30,
+  "total_results": 581
+}

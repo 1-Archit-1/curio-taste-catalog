@@ -1,0 +1,47 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [
+        27
+      ],
+      "id": 1836957,
+      "title": "Mama Bear",
+      "original_language": "en",
+      "original_title": "Mama Bear",
+      "overview": "Floyd's sleep is disrupted by disturbing phone calls that escalate from annoying to menacing when he realizes a doppelgänger may be nearby.",
+      "popularity": 0.0,
+      "poster_path": "/heHMRj5IaA0GsbaGI9V4cDzf3rW.jpg",
+      "release_date": "2026-10-29",
+      "softcore": false,
+      "video": false,
+      "vote_average": 0.0,
+      "vote_count": 0
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [
+        27,
+        18,
+        878
+      ],
+      "id": 1836920,
+      "title": "Deadline",
+      "original_language": "en",
+      "original_title": "Deadline",
+      "overview": "Mitchell Wallace is tasked with a project that's only due in a few days. Unfortunately for him, things aren't going as planned.",
+      "popularity": 0.0,
+      "poster_path": "/6mDu0Jo3YicBfls9GtiPUYqvhe1.jpg",
+      "release_date": "2026-11-20",
+      "softcore": false,
+      "video": false,
+      "vote_average": 0.0,
+      "vote_count": 0
+    }
+  ],
+  "total_pages": 1001,
+  "total_results": 20001
+}

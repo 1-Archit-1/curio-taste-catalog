@@ -18,7 +18,7 @@ docker compose down          # add -v to also delete the database volume
 ```
 
 
-Process counts come from `.env`: `API_WORKERS` (uvicorn workers in the api container) and `WORKER_REPLICAS` (worker containers). `docker compose up -d --scale worker=3` also works.
+Process counts come from `.env`: `API_WORKERS` (uvicorn workers in the api container) and `WORKER_REPLICAS` (worker containers). `docker compose up -d --scale worker=3` also works, but the TMDB rate limit (`TMDB_REQUESTS_PER_SECOND_TOTAL`, default 40) is divided by `WORKER_REPLICAS`, and compose does not see `--scale`. Set `WORKER_REPLICAS` to the real number of workers. `WORKER_PROCESS_COUNT` only matters when you run workers outside compose.
 
 ### Migrations
 

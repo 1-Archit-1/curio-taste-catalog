@@ -61,6 +61,10 @@ services:
       <<: *app-env
       # Only workers hold the private key (ADR 0002).
       KEY_PRIVATE_KEY: ${KEY_PRIVATE_KEY:-}
+      # The TMDB request budget is split evenly across worker replicas (one process each).
+      # Compose has no env_file, so these must be passed explicitly to reach the container.
+      TMDB_REQUESTS_PER_SECOND_TOTAL: ${TMDB_REQUESTS_PER_SECOND_TOTAL:-40}
+      WORKER_PROCESS_COUNT: ${WORKER_REPLICAS:-1}
     command: ["python", "-m", "curio.worker"]
     restart: unless-stopped
     deploy:

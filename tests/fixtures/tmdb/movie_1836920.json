@@ -1,0 +1,58 @@
+{
+  "adult": false,
+  "backdrop_path": null,
+  "belongs_to_collection": null,
+  "budget": 0,
+  "genres": [
+    {
+      "id": 27,
+      "name": "Horror"
+    },
+    {
+      "id": 18,
+      "name": "Drama"
+    },
+    {
+      "id": 878,
+      "name": "Science Fiction"
+    }
+  ],
+  "homepage": "",
+  "id": 1836920,
+  "imdb_id": null,
+  "origin_country": [
+    "US"
+  ],
+  "original_language": "en",
+  "original_title": "Deadline",
+  "overview": "Mitchell Wallace is tasked with a project that's only due in a few days. Unfortunately for him, things aren't going as planned.",
+  "popularity": 0.0776,
+  "poster_path": "/6mDu0Jo3YicBfls9GtiPUYqvhe1.jpg",
+  "production_companies": [],
+  "production_countries": [],
+  "release_date": "2026-11-20",
+  "revenue": 0,
+  "runtime": 6,
+  "softcore": false,
+  "spoken_languages": [],
+  "status": "Released",
+  "tagline": "She's smarter than the scientist who made her.",
+  "title": "Deadline",
+  "video": false,
+  "vote_average": 0.0,
+  "vote_count": 0,
+  "external_ids": {
+    "imdb_id": null,
+    "wikidata_id": null,
+    "facebook_id": null,
+    "instagram_id": null,
+    "twitter_id": null
+  },
+  "keywords": {
+    "keywords": []
+  },
+  "credits": {
+    "cast": [],
+    "crew": []
+  }
+}
