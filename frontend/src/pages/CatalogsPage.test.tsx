@@ -161,6 +161,12 @@ describe("CatalogsPage", () => {
       ],
     };
 
+    const vetoRequests: Array<{
+      method: string;
+      pathname: string;
+      body?: Record<string, unknown>;
+    }> = [];
+
     fetchMock.mockImplementation(async (input, init) => {
       const url =
         typeof input === "string"
@@ -268,6 +274,7 @@ describe("CatalogsPage", () => {
       if (pathname.startsWith("/api/vetoes/") && method === "PUT") {
         const imdbId = pathname.split("/").pop() ?? "";
         const body = await readBody();
+        vetoRequests.push({ method, pathname, body });
         const kind = body.kind as "seen" | "not_for_me";
         for (const list of Object.values(candidatesByPreset)) {
           for (const item of list) {
@@ -280,6 +287,7 @@ describe("CatalogsPage", () => {
       }
       if (pathname.startsWith("/api/vetoes/") && method === "DELETE") {
         const imdbId = pathname.split("/").pop() ?? "";
+        vetoRequests.push({ method, pathname });
         for (const list of Object.values(candidatesByPreset)) {
           for (const item of list) {
             if (item.imdb_id === imdbId) {
@@ -333,7 +341,7 @@ describe("CatalogsPage", () => {
       ).not.toBeInTheDocument();
     });
 
-    // Veto "The Matrix" as Seen, then Undo via the undo banner.
+    // Veto "The Matrix" as Seen, then Undo via the undo banner (null -> seen -> DELETE).
     const matrixCard = screen
       .getByText("The Matrix")
       .closest<HTMLElement>("[data-imdb-id='tt0133093']");
@@ -350,6 +358,59 @@ describe("CatalogsPage", () => {
     expect(
       within(matrixCard).queryByRole("button", { name: "Undo" }),
     ).not.toBeInTheDocument();
+    expect(vetoRequests).toEqual([
+      {
+        method: "PUT",
+        pathname: "/api/vetoes/tt0133093",
+        body: { kind: "seen" },
+      },
+      { method: "DELETE", pathname: "/api/vetoes/tt0133093" },
+    ]);
+
+    // Change an existing veto (seen -> not_for_me -> Undo restores PUT seen).
+    vetoRequests.length = 0;
+    await user.click(within(matrixCard).getByRole("button", { name: "Seen" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /Marked The Matrix as Seen\./i,
+    );
+
+    await user.click(
+      within(matrixCard).getByRole("button", { name: "Not for me" }),
+    );
+    const secondBanner = await screen.findByRole("status");
+    expect(secondBanner).toHaveTextContent(
+      /Marked The Matrix as Not for me\./i,
+    );
+    expect(
+      within(matrixCard).getByText("Not for me", { selector: "span" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(secondBanner).getByRole("button", { name: "Undo" }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+    expect(
+      within(matrixCard).getByText("Seen", { selector: "span" }),
+    ).toBeInTheDocument();
+    expect(vetoRequests).toEqual([
+      {
+        method: "PUT",
+        pathname: "/api/vetoes/tt0133093",
+        body: { kind: "seen" },
+      },
+      {
+        method: "PUT",
+        pathname: "/api/vetoes/tt0133093",
+        body: { kind: "not_for_me" },
+      },
+      {
+        method: "PUT",
+        pathname: "/api/vetoes/tt0133093",
+        body: { kind: "seen" },
+      },
+    ]);
 
     // Veto "Blade Runner" as Not for me, then Undo via the card's Undo button.
     const bladeCard = screen

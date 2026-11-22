@@ -19,6 +19,7 @@ interface RecentVeto {
   imdb_id: string;
   name: string;
   kind: VetoKind;
+  previousVeto: VetoKind | null;
 }
 
 function parseOptionalRating(raw: string): number | null {
@@ -249,6 +250,7 @@ export function CatalogsPage() {
 
   async function handleVeto(candidate: CandidateOut, kind: VetoKind) {
     setVetoStatus({ text: "", kind: "" });
+    const previousVeto = candidate.veto_kind ?? null;
     const { data, error, response } = await apiClient.PUT(
       "/api/vetoes/{imdb_id}",
       {
@@ -266,6 +268,7 @@ export function CatalogsPage() {
         imdb_id: candidate.imdb_id,
         name: candidate.name,
         kind: data.kind,
+        previousVeto,
       });
     } else if (response.status !== 401) {
       setVetoStatus({
@@ -275,8 +278,35 @@ export function CatalogsPage() {
     }
   }
 
-  async function handleUndoVeto(imdbId: string) {
+  async function handleUndoVeto(
+    imdbId: string,
+    previousVeto: VetoKind | null = null,
+  ) {
     setVetoStatus({ text: "", kind: "" });
+    if (previousVeto !== null) {
+      const { data, error, response } = await apiClient.PUT(
+        "/api/vetoes/{imdb_id}",
+        {
+          params: { path: { imdb_id: imdbId } },
+          body: { kind: previousVeto },
+        },
+      );
+      if (response.ok && data) {
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.imdb_id === imdbId ? { ...c, veto_kind: data.kind } : c,
+          ),
+        );
+        setLastVeto((prev) => (prev?.imdb_id === imdbId ? null : prev));
+      } else if (response.status !== 401) {
+        setVetoStatus({
+          text: extractErrorDetail(error, "Could not restore veto."),
+          kind: "err",
+        });
+      }
+      return;
+    }
+
     const { error, response } = await apiClient.DELETE(
       "/api/vetoes/{imdb_id}",
       { params: { path: { imdb_id: imdbId } } },
@@ -516,7 +546,9 @@ export function CatalogsPage() {
             <button
               className="btn"
               type="button"
-              onClick={() => void handleUndoVeto(lastVeto.imdb_id)}
+              onClick={() =>
+                void handleUndoVeto(lastVeto.imdb_id, lastVeto.previousVeto)
+              }
             >
               Undo
             </button>

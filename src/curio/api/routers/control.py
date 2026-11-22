@@ -43,9 +43,7 @@ from curio.api.schemas.settings import (
 )
 from curio.clients.providers import LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
-from curio.db.models.catalogs import Preset
 from curio.db.models.users import User
-from curio.repositories.catalogs import SlotRow
 from curio.services import auth as auth_service
 from curio.services import catalogs as catalogs_service
 from curio.services import keys as keys_service
@@ -266,23 +264,11 @@ async def get_audit_log(
     )
 
 
-def _preset_to_out(preset: Preset) -> PresetOut:
-    return PresetOut(
-        id=preset.id,
-        name=preset.name,
-        media_type=preset.media_type,  # type: ignore[arg-type]
-        min_rating=preset.min_rating,
-        criteria=preset.criteria,
-        created_at=preset.created_at,
-        updated_at=preset.updated_at,
-    )
-
-
-def _slot_to_out(slot: SlotRow) -> SlotOut:
+def _slot_to_out(slot: catalogs_service.SlotRow) -> SlotOut:
     return SlotOut(
         slot_id=slot.slot_id,
         name=slot.name,
-        media_type=slot.media_type,  # type: ignore[arg-type]
+        media_type=slot.media_type,
         preset_id=slot.preset_id,
         preset_name=slot.preset_name,
     )
@@ -324,7 +310,7 @@ async def assign_slot(
 @router.get("/presets")
 async def list_presets(user: CurrentUser, session: DbSession) -> PresetListResponse:
     presets = await catalogs_service.list_presets(session, user_id=user.id)
-    return PresetListResponse(presets=[_preset_to_out(p) for p in presets])
+    return PresetListResponse(presets=[PresetOut.model_validate(p) for p in presets])
 
 
 @router.post("/presets", status_code=status.HTTP_201_CREATED)
@@ -341,7 +327,7 @@ async def create_preset(
         min_rating=payload.min_rating,
         criteria=payload.criteria,
     )
-    return _preset_to_out(preset)
+    return PresetOut.model_validate(preset)
 
 
 @router.patch("/presets/{preset_id}")
@@ -351,20 +337,19 @@ async def update_preset(
     user: CurrentUser,
     session: DbSession,
 ) -> PresetOut:
+    updates = payload.model_dump(exclude_unset=True)
     preset = await catalogs_service.update_preset(
         session,
         user_id=user.id,
         preset_id=preset_id,
-        name=payload.name,
-        min_rating=payload.min_rating,
-        criteria=payload.criteria,
+        **updates,
     )
     if preset is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Preset not found.",
         )
-    return _preset_to_out(preset)
+    return PresetOut.model_validate(preset)
 
 
 @router.delete("/presets/{preset_id}")
@@ -392,6 +377,7 @@ async def list_preset_candidates(
     request: Request,
     user: CurrentUser,
     session: DbSession,
+    settings: AppSettings,
 ) -> CandidateListResponse:
     preset = await catalogs_service.get_preset(
         session,
@@ -408,13 +394,13 @@ async def list_preset_candidates(
         user_id=user.id,
         preset_id=preset_id,
     )
-    base_url = str(request.base_url)
+    base_url = settings.public_base_url or str(request.base_url)
     return CandidateListResponse(
         preset_id=preset_id,
         candidates=[
             CandidateOut(
                 imdb_id=c.imdb_id,
-                media_type=c.media_type,  # type: ignore[arg-type]
+                media_type=c.media_type,
                 name=c.name,
                 year=c.year,
                 poster=catalogs_service.resolve_poster_url(c.poster_url, base_url=base_url),
@@ -423,7 +409,7 @@ async def list_preset_candidates(
                 blurb=c.blurb,
                 position=c.position,
                 watch_status=c.watch_status,
-                veto_kind=c.veto_kind,  # type: ignore[arg-type]
+                veto_kind=c.veto_kind,
             )
             for c in rows
         ],
@@ -449,10 +435,7 @@ async def upsert_veto(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    return VetoOut(
-        imdb_id=veto.imdb_id,
-        kind=veto.kind,  # type: ignore[arg-type]
-    )
+    return VetoOut.model_validate(veto)
 
 
 @router.delete("/vetoes/{imdb_id}")

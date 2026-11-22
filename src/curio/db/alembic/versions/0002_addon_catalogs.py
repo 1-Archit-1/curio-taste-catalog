@@ -107,7 +107,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["user_id", "preset_id"],
             ["presets.user_id", "presets.id"],
-            ondelete="SET NULL",
+            ondelete="SET NULL (preset_id)",
             name="fk_slots_user_preset",
         ),
         sa.PrimaryKeyConstraint("user_id", "slot_id"),
@@ -213,6 +213,7 @@ def upgrade() -> None:
         """
     )
 
+    # Ratings use a 0-10 scale; <= 5.0 corresponds to <= 2.5 Letterboxd stars.
     op.execute(
         """
         CREATE VIEW anti_taste AS

@@ -102,7 +102,7 @@ class Slot(Base):
         ForeignKeyConstraint(
             ["user_id", "preset_id"],
             ["presets.user_id", "presets.id"],
-            ondelete="SET NULL",
+            ondelete="SET NULL (preset_id)",
             name="fk_slots_user_preset",
         ),
     )

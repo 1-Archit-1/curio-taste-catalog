@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from curio import ADDON_NAME, __version__
-from curio.api.deps import DbSession
+from curio.api.deps import AppSettings, DbSession
 from curio.services import catalogs as catalogs_service
 from curio.services import users as users_service
 
@@ -118,6 +118,7 @@ async def addon_manifest(
 async def _serve_catalog(
     request: Request,
     session: DbSession,
+    settings: AppSettings,
     *,
     addon_token: str,
     media_type: str,
@@ -145,7 +146,7 @@ async def _serve_catalog(
         skip=resolved_skip,
         limit=20,
     )
-    base_url = str(request.base_url)
+    base_url = settings.public_base_url or str(request.base_url)
     metas = [
         {
             "id": item.imdb_id,
@@ -166,11 +167,13 @@ async def addon_catalog(
     media_type: str,
     catalog_id: str,
     session: DbSession,
+    settings: AppSettings,
     skip: int | None = None,
 ) -> JSONResponse:
     return await _serve_catalog(
         request,
         session,
+        settings,
         addon_token=addon_token,
         media_type=media_type,
         catalog_id=catalog_id,
@@ -187,11 +190,13 @@ async def addon_catalog_extra(
     catalog_id: str,
     extra: str,
     session: DbSession,
+    settings: AppSettings,
     skip: int | None = None,
 ) -> JSONResponse:
     return await _serve_catalog(
         request,
         session,
+        settings,
         addon_token=addon_token,
         media_type=media_type,
         catalog_id=catalog_id,

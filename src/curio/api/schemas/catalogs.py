@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MediaType = Literal["movie", "series"]
 VetoKind = Literal["seen", "not_for_me"]
@@ -34,17 +34,21 @@ class PresetCreateRequest(BaseModel):
 
 
 class PresetUpdateRequest(BaseModel):
-    name: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1)
     min_rating: float | None = Field(default=None, ge=0.0, le=10.0)
     criteria: str | None = None
 
     @field_validator("name")
     @classmethod
-    def _validate_name(cls, value: str) -> str:
+    def _validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            raise ValueError("must not be empty")
         return _strip_non_empty(value)
 
 
 class PresetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     name: str
     media_type: MediaType
@@ -98,5 +102,7 @@ class VetoRequest(BaseModel):
 
 
 class VetoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     imdb_id: str
     kind: VetoKind

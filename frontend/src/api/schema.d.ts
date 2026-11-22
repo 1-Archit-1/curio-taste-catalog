@@ -437,7 +437,7 @@ export interface components {
             /** Min Rating */
             min_rating?: number | null;
             /** Name */
-            name: string;
+            name?: string | null;
         };
         /** RotateAddonTokenResponse */
         RotateAddonTokenResponse: {

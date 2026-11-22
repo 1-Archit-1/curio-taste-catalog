@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from curio.db.models.catalogs import Preset, Veto
 from curio.repositories import catalogs as catalogs_repo
 from curio.repositories.catalogs import (
+    _UNSET,
     FIXED_SLOTS,
     FIXED_SLOTS_BY_ID,
     AntiTasteRow,
@@ -16,6 +17,7 @@ from curio.repositories.catalogs import (
     ExcludedTitleRow,
     SlotDefinition,
     SlotRow,
+    _UnsetType,
 )
 
 VALID_MEDIA_TYPES = frozenset({"movie", "series"})
@@ -25,6 +27,7 @@ __all__ = [
     "FIXED_SLOTS",
     "FIXED_SLOTS_BY_ID",
     "SlotDefinition",
+    "SlotRow",
     "assign_slot",
     "create_preset",
     "delete_preset",
@@ -124,22 +127,23 @@ async def update_preset(
     *,
     user_id: UUID,
     preset_id: UUID,
-    name: str,
-    media_type: str | None = None,
-    min_rating: float | None = None,
-    criteria: str | None = None,
+    name: str | _UnsetType = _UNSET,
+    min_rating: float | None | _UnsetType = _UNSET,
+    criteria: str | None | _UnsetType = _UNSET,
 ) -> Preset | None:
-    if media_type is not None and media_type not in VALID_MEDIA_TYPES:
-        raise ValueError(f"invalid media_type '{media_type}'")
-    cleaned_name = name.strip()
-    if not cleaned_name:
-        raise ValueError("preset name cannot be empty")
+    cleaned_name: str | _UnsetType = _UNSET
+    if not isinstance(name, _UnsetType):
+        if name is None:  # type: ignore[unreachable]
+            raise ValueError("preset name cannot be empty")
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValueError("preset name cannot be empty")
+        cleaned_name = cleaned
     return await catalogs_repo.update_preset(
         session,
         user_id=user_id,
         preset_id=preset_id,
         name=cleaned_name,
-        media_type=media_type,
         min_rating=min_rating,
         criteria=criteria,
     )

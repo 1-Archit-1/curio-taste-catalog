@@ -7,19 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from curio.db.models.catalogs import (
-    CatalogCandidate,
-    MediaItem,
-    Preset,
-    Slot,
-    Veto,
-    WatchHistory,
-)
+from curio.db.models.catalogs import Preset
 from curio.db.models.users import User
+from curio.repositories import catalogs as catalogs_repo
 from curio.repositories import users as users_repo
 from curio.services import users as users_service
 
@@ -53,7 +45,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2013,
         "rating": 8.2,
         "tmdb_id": 146233,
-        "poster_url": "https://image.tmdb.org/t/p/w500/uhviyKPTT50F2n5c2fG8fZ6W4vT.jpg",
+        "poster_url": None,
         "description": (
             "When two young girls go missing, a desperate father takes matters into his own hands."
         ),
@@ -64,7 +56,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2007,
         "rating": 7.7,
         "tmdb_id": 1949,
-        "poster_url": "https://image.tmdb.org/t/p/w500/6YmeO4pB7X583333t42w5X6zX2X.jpg",
+        "poster_url": None,
         "description": (
             "Cartoonists and detectives become obsessed with tracking the Zodiac killer in San "
             "Francisco."
@@ -99,7 +91,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 7.6,
         "tmdb_id": 273481,
-        "poster_url": "https://image.tmdb.org/t/p/w500/lz8vNyXeidqqARh0A3GAKveJ0tL.jpg",
+        "poster_url": None,
         "description": (
             "An idealistic FBI agent is enlisted by a government task force to aid in the "
             "escalating war on drugs."
@@ -123,7 +115,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2004,
         "rating": 7.5,
         "tmdb_id": 1538,
-        "poster_url": "https://image.tmdb.org/t/p/w500/nV5f3jM2uM3V9lS6gM5w6bM9Y8Q.jpg",
+        "poster_url": None,
         "description": (
             "A cab driver finds himself the hostage of an engaging contract killer making his "
             "rounds."
@@ -170,7 +162,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2003,
         "rating": 8.1,
         "tmdb_id": 11423,
-        "poster_url": "https://image.tmdb.org/t/p/w500/rxnd492hX7S0L3wL8jK1w0yR8k9.jpg",
+        "poster_url": None,
         "description": (
             "Two detectives in a small Korean province struggle to solve a string of baffling "
             "murders."
@@ -182,7 +174,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2014,
         "rating": 8.1,
         "tmdb_id": 210577,
-        "poster_url": "https://image.tmdb.org/t/p/w500/lv5xShV6M2V5e3S5Y3f3m2d2d2d.jpg",
+        "poster_url": None,
         "description": (
             "With his wife's disappearance having become the focus of an intense media circus, "
             "a man sees suspicion fall on him."
@@ -253,7 +245,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 7.3,
         "tmdb_id": 429200,
-        "poster_url": "https://image.tmdb.org/t/p/w500/7J2z6jV0a8k2F2B9b9G5w8X1Q5e.jpg",
+        "poster_url": None,
         "description": (
             "After a botched bank robbery lands his younger brother in prison, a man embarks on "
             "a twisted odyssey."
@@ -265,7 +257,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 7.0,
         "tmdb_id": 313922,
-        "poster_url": "https://image.tmdb.org/t/p/w500/k9u3x1f2R8s4F3x5Q2V7z5Y2K1e.jpg",
+        "poster_url": None,
         "description": (
             "A punk rock band is forced to fight for survival after witnessing a murder at an "
             "isolated venue."
@@ -277,7 +269,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 7.7,
         "tmdb_id": 395834,
-        "poster_url": "https://image.tmdb.org/t/p/w500/pySivdR845Fg4u6lR18V2M2q8fA.jpg",
+        "poster_url": None,
         "description": (
             "A wildlife tracker and an FBI agent investigate a murder on a snowy Wyoming "
             "reservation."
@@ -312,7 +304,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 1997,
         "rating": 7.7,
         "tmdb_id": 2649,
-        "poster_url": "https://image.tmdb.org/t/p/w500/4U95W5uN7M3k5g1G6p5S2R3l1T1.jpg",
+        "poster_url": None,
         "description": (
             "After a wealthy San Francisco banker is given an unusual birthday gift, his life "
             "spirals out of control."
@@ -324,7 +316,7 @@ _DEMO_MOVIES: list[dict[str, object]] = [
         "year": 2017,
         "rating": 4.7,
         "tmdb_id": 372343,
-        "poster_url": "https://image.tmdb.org/t/p/w500/bQs5Q0t1k4U5z7l2g4M2N4P5q6R.jpg",
+        "poster_url": None,
         "description": (
             "Detective Harry Hole investigates the disappearance of a woman whose scarf is "
             "found on a snowman."
@@ -375,7 +367,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2015,
         "rating": 8.5,
         "tmdb_id": 63639,
-        "poster_url": "https://image.tmdb.org/t/p/w500/86m15B8p0U7U1B7S5j2d2Y8w6z2.jpg",
+        "poster_url": None,
         "description": (
             "A hardened detective and a rogue ship's crew uncover a vast conspiracy that "
             "threatens the Solar System."
@@ -387,7 +379,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2023,
         "rating": 8.1,
         "tmdb_id": 125988,
-        "poster_url": "https://image.tmdb.org/t/p/w500/c2OijvbFEXBW1onbzuvx642rB2h.jpg",
+        "poster_url": None,
         "description": (
             "Men and women live in a giant silo underground with several regulations they "
             "believe protect them."
@@ -399,7 +391,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2021,
         "rating": 7.6,
         "tmdb_id": 93740,
-        "poster_url": "https://image.tmdb.org/t/p/w500/A1fXGFxGrfnf0L1aP1b5T4V8vQ2.jpg",
+        "poster_url": None,
         "description": (
             "A complex saga of humans scattered on planets throughout the galaxy all living "
             "under the rule of the Galactic Empire."
@@ -423,7 +415,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2020,
         "rating": 7.7,
         "tmdb_id": 91363,
-        "poster_url": "https://image.tmdb.org/t/p/w500/5Z2iG4pM9R1oP4fF0tD5yK2m2S2.jpg",
+        "poster_url": None,
         "description": (
             "A computer engineer investigates the secretive development division in her "
             "company, which she believes is behind her boyfriend's disappearance."
@@ -435,7 +427,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2014,
         "rating": 8.3,
         "tmdb_id": 54344,
-        "poster_url": "https://image.tmdb.org/t/p/w500/ri8xr223xE8c2H7V7W4vV4uV1pA.jpg",
+        "poster_url": None,
         "description": (
             "Three years after the disappearance of two percent of the global population, a "
             "group of people in New York struggle to continue."
@@ -447,7 +439,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2021,
         "rating": 7.7,
         "tmdb_id": 111044,
-        "poster_url": "https://image.tmdb.org/t/p/w500/7vN4v7fQ7tB7r8W1c7J1K9V7D5e.jpg",
+        "poster_url": None,
         "description": (
             "A post-apocalyptic saga spanning multiple timelines, telling the stories of "
             "survivors of a devastating flu."
@@ -471,7 +463,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2010,
         "rating": 8.4,
         "tmdb_id": 1426,
-        "poster_url": "https://image.tmdb.org/t/p/w500/y4w7a1R5Z9lX4tQ2gN7H1K9V6uE.jpg",
+        "poster_url": None,
         "description": (
             "DCI John Luther is a near-genius murder detective whose brilliant mind can't "
             "always save him from the dark."
@@ -483,7 +475,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2018,
         "rating": 7.9,
         "tmdb_id": 68421,
-        "poster_url": "https://image.tmdb.org/t/p/w500/95S6O5vN5s0sV8h6sF5Y8X6m1dD.jpg",
+        "poster_url": None,
         "description": (
             "Set in a future where consciousness is digitized and stored, a prisoner returns to "
             "life in a new body."
@@ -495,7 +487,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2011,
         "rating": 8.5,
         "tmdb_id": 1411,
-        "poster_url": "https://image.tmdb.org/t/p/w500/a2d1qN8P7tR2kM4kY6eB8W4c7dC.jpg",
+        "poster_url": None,
         "description": (
             "An ex-CIA agent and a wealthy programmer save lives via a surveillance AI that "
             "sends them the identities of civilians."
@@ -519,7 +511,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2019,
         "rating": 8.1,
         "tmdb_id": 87917,
-        "poster_url": "https://image.tmdb.org/t/p/w500/bf7U2hP0U1U1B7S5j2d2Y8w6z2.jpg",
+        "poster_url": None,
         "description": (
             "In an alternative version of 1969, the Soviet Union beats the United States to the "
             "Moon, and the space race continues."
@@ -543,7 +535,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2024,
         "rating": 7.5,
         "tmdb_id": 108545,
-        "poster_url": "https://image.tmdb.org/t/p/w500/ykZ7hlShMkR3GD22x04B52Z56e1.jpg",
+        "poster_url": None,
         "description": (
             "A fateful decision made in 1960s China reverberates in the present day, where a "
             "group of scientists confront humanity's greatest threat."
@@ -555,7 +547,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2023,
         "rating": 8.7,
         "tmdb_id": 203744,
-        "poster_url": "https://image.tmdb.org/t/p/w500/fA1bQ5J0N3s7k1T6J2Z8Y3W9uE1.jpg",
+        "poster_url": None,
         "description": (
             "The surviving crew of a damaged deep space freighter are stranded on a beautiful "
             "yet unforgiving alien planet."
@@ -626,7 +618,7 @@ _DEMO_SERIES: list[dict[str, object]] = [
         "year": 2018,
         "rating": 5.2,
         "tmdb_id": 75450,
-        "poster_url": "https://image.tmdb.org/t/p/w500/x53l60S7c3H0wW4R8eR5V7n9k8l.jpg",
+        "poster_url": None,
         "description": (
             "A team of young superheroes led by Nightwing form to combat evil and other perils."
         ),
@@ -643,30 +635,23 @@ async def _ensure_preset(
     min_rating: float | None,
     criteria: str | None,
 ) -> Preset:
-    existing = (
-        await session.execute(
-            select(Preset).where(
-                Preset.user_id == user_id,
-                Preset.name == name,
-                Preset.media_type == media_type,
-            )
-        )
-    ).scalar_one_or_none()
+    existing = await catalogs_repo.get_preset_by_name(
+        session,
+        user_id=user_id,
+        name=name,
+        media_type=media_type,
+    )
     if existing is not None:
         return existing
 
-    stmt = (
-        pg_insert(Preset)
-        .values(
-            user_id=user_id,
-            name=name,
-            media_type=media_type,
-            min_rating=min_rating,
-            criteria=criteria,
-        )
-        .returning(Preset)
+    return await catalogs_repo.create_preset(
+        session,
+        user_id=user_id,
+        name=name,
+        media_type=media_type,
+        min_rating=min_rating,
+        criteria=criteria,
     )
-    return (await session.execute(stmt)).scalar_one()
 
 
 async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSeedResult:
@@ -682,12 +667,10 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         created_user = False
         login_token = None
 
-    media_rows = [{**item, "media_type": "movie"} for item in _DEMO_MOVIES] + [
-        {**item, "media_type": "series"} for item in _DEMO_SERIES
-    ]
-    await session.execute(
-        pg_insert(MediaItem).values(media_rows).on_conflict_do_nothing(index_elements=["imdb_id"])
-    )
+    media_rows: list[dict[str, object]] = [
+        {**item, "media_type": "movie"} for item in _DEMO_MOVIES
+    ] + [{**item, "media_type": "series"} for item in _DEMO_SERIES]
+    await catalogs_repo.insert_media_items_ignore_conflicts(session, media_rows)
 
     movie_preset = await _ensure_preset(
         session,
@@ -706,7 +689,7 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         criteria="High-concept, character-driven prestige science fiction series.",
     )
 
-    slot_rows = [
+    slot_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
             "slot_id": "curio_movie_1",
@@ -744,13 +727,9 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
             "preset_id": None,
         },
     ]
-    await session.execute(
-        pg_insert(Slot)
-        .values(slot_rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "slot_id"])
-    )
+    await catalogs_repo.insert_slots_ignore_conflicts(session, slot_rows)
 
-    candidate_rows = [
+    candidate_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
             "preset_id": movie_preset.id,
@@ -769,14 +748,10 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
         }
         for idx, item in enumerate(_DEMO_SERIES)
     ]
-    await session.execute(
-        pg_insert(CatalogCandidate)
-        .values(candidate_rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "preset_id", "imdb_id"])
-    )
+    await catalogs_repo.insert_candidates_ignore_conflicts(session, candidate_rows)
 
     now = datetime.now(UTC)
-    watch_history_rows = [
+    watch_history_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
             "imdb_id": str(_DEMO_MOVIES[0]["imdb_id"]),  # Se7en - watched, high rating
@@ -802,13 +777,9 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
             "source": "manual",
         },
     ]
-    await session.execute(
-        pg_insert(WatchHistory)
-        .values(watch_history_rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
-    )
+    await catalogs_repo.insert_watch_history_ignore_conflicts(session, watch_history_rows)
 
-    veto_rows = [
+    veto_rows: list[dict[str, object]] = [
         {
             "user_id": user.id,
             "imdb_id": str(_DEMO_MOVIES[1]["imdb_id"]),  # Prisoners - seen
@@ -820,11 +791,7 @@ async def seed_demo(session: AsyncSession, *, username: str = "demo") -> DemoSee
             "kind": "not_for_me",
         },
     ]
-    await session.execute(
-        pg_insert(Veto)
-        .values(veto_rows)
-        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
-    )
+    await catalogs_repo.insert_vetoes_ignore_conflicts(session, veto_rows)
 
     return DemoSeedResult(
         user=user,

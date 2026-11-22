@@ -1,9 +1,10 @@
 """Catalog, preset, slot, watch-history, and veto persistence using SQLAlchemy 2.0."""
 
 from dataclasses import dataclass
+from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, insert, select, text, update
+from sqlalchemy import column, delete, exists, func, insert, select, table, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,16 @@ from curio.db.models.catalogs import (
     WatchHistory,
 )
 
+MediaType = Literal["movie", "series"]
+VetoKind = Literal["seen", "not_for_me"]
+
+
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
+
 
 @dataclass(frozen=True)
 class SlotDefinition:
@@ -23,7 +34,7 @@ class SlotDefinition:
 
     slot_id: str
     name: str
-    media_type: str
+    media_type: MediaType
 
 
 FIXED_SLOTS: tuple[SlotDefinition, ...] = (
@@ -42,7 +53,7 @@ FIXED_SLOTS_BY_ID: dict[str, SlotDefinition] = {slot.slot_id: slot for slot in F
 class SlotRow:
     slot_id: str
     name: str
-    media_type: str
+    media_type: MediaType
     preset_id: UUID | None
     preset_name: str | None
 
@@ -50,7 +61,7 @@ class SlotRow:
 @dataclass(frozen=True)
 class CandidateRow:
     imdb_id: str
-    media_type: str
+    media_type: MediaType
     name: str
     year: int | None
     poster_url: str | None
@@ -61,7 +72,7 @@ class CandidateRow:
     blurb: str | None
     watch_status: str | None
     watch_rating: float | None
-    veto_kind: str | None
+    veto_kind: VetoKind | None
 
 
 @dataclass(frozen=True)
@@ -108,6 +119,21 @@ async def get_preset(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def get_preset_by_name(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    name: str,
+    media_type: str,
+) -> Preset | None:
+    stmt = select(Preset).where(
+        Preset.user_id == user_id,
+        Preset.name == name,
+        Preset.media_type == media_type,
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def create_preset(
     session: AsyncSession,
     *,
@@ -136,19 +162,17 @@ async def update_preset(
     *,
     user_id: UUID,
     preset_id: UUID,
-    name: str,
-    media_type: str | None = None,
-    min_rating: float | None = None,
-    criteria: str | None = None,
+    name: str | _UnsetType = _UNSET,
+    min_rating: float | None | _UnsetType = _UNSET,
+    criteria: str | None | _UnsetType = _UNSET,
 ) -> Preset | None:
-    values: dict[str, object] = {
-        "name": name,
-        "min_rating": min_rating,
-        "criteria": criteria,
-        "updated_at": func.now(),
-    }
-    if media_type is not None:
-        values["media_type"] = media_type
+    values: dict[str, object] = {"updated_at": func.now()}
+    if not isinstance(name, _UnsetType):
+        values["name"] = name
+    if not isinstance(min_rating, _UnsetType):
+        values["min_rating"] = min_rating
+    if not isinstance(criteria, _UnsetType):
+        values["criteria"] = criteria
 
     stmt = (
         update(Preset)
@@ -296,7 +320,7 @@ async def list_preset_candidates(
     return [
         CandidateRow(
             imdb_id=row.imdb_id,
-            media_type=row.media_type,
+            media_type=cast(MediaType, row.media_type),
             name=row.name,
             year=row.year,
             poster_url=row.poster_url,
@@ -307,7 +331,7 @@ async def list_preset_candidates(
             blurb=row.blurb,
             watch_status=row.watch_status,
             watch_rating=row.watch_rating,
-            veto_kind=row.veto_kind,
+            veto_kind=cast(VetoKind | None, row.veto_kind),
         )
         for row in rows
     ]
@@ -338,22 +362,13 @@ async def query_slot_catalog(
     if preset_row is None:
         return []
 
-    excluded_watch = exists(
+    excluded_titles = table("excluded_titles", column("user_id"), column("imdb_id"))
+    is_excluded = exists(
         select(1)
-        .select_from(WatchHistory)
+        .select_from(excluded_titles)
         .where(
-            WatchHistory.user_id == user_id,
-            WatchHistory.imdb_id == CatalogCandidate.imdb_id,
-            WatchHistory.status.in_(("watched", "dropped")),
-        )
-    )
-    excluded_veto = exists(
-        select(1)
-        .select_from(Veto)
-        .where(
-            Veto.user_id == user_id,
-            Veto.imdb_id == CatalogCandidate.imdb_id,
-            Veto.kind.in_(("seen", "not_for_me")),
+            excluded_titles.c.user_id == user_id,
+            excluded_titles.c.imdb_id == CatalogCandidate.imdb_id,
         )
     )
 
@@ -373,8 +388,7 @@ async def query_slot_catalog(
         .where(
             CatalogCandidate.user_id == user_id,
             CatalogCandidate.preset_id == preset_row.id,
-            ~excluded_watch,
-            ~excluded_veto,
+            ~is_excluded,
         )
     )
     if preset_row.min_rating is not None:
@@ -472,3 +486,71 @@ async def media_item_exists(
 ) -> bool:
     stmt = select(1).select_from(MediaItem).where(MediaItem.imdb_id == imdb_id)
     return (await session.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def insert_media_items_ignore_conflicts(
+    session: AsyncSession,
+    rows: list[dict[str, object]],
+) -> None:
+    if not rows:
+        return
+    stmt = (
+        postgresql.insert(MediaItem).values(rows).on_conflict_do_nothing(index_elements=["imdb_id"])
+    )
+    await session.execute(stmt)
+
+
+async def insert_slots_ignore_conflicts(
+    session: AsyncSession,
+    rows: list[dict[str, object]],
+) -> None:
+    if not rows:
+        return
+    stmt = (
+        postgresql.insert(Slot)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["user_id", "slot_id"])
+    )
+    await session.execute(stmt)
+
+
+async def insert_candidates_ignore_conflicts(
+    session: AsyncSession,
+    rows: list[dict[str, object]],
+) -> None:
+    if not rows:
+        return
+    stmt = (
+        postgresql.insert(CatalogCandidate)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["user_id", "preset_id", "imdb_id"])
+    )
+    await session.execute(stmt)
+
+
+async def insert_watch_history_ignore_conflicts(
+    session: AsyncSession,
+    rows: list[dict[str, object]],
+) -> None:
+    if not rows:
+        return
+    stmt = (
+        postgresql.insert(WatchHistory)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
+    )
+    await session.execute(stmt)
+
+
+async def insert_vetoes_ignore_conflicts(
+    session: AsyncSession,
+    rows: list[dict[str, object]],
+) -> None:
+    if not rows:
+        return
+    stmt = (
+        postgresql.insert(Veto)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["user_id", "imdb_id"])
+    )
+    await session.execute(stmt)

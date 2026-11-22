@@ -570,3 +570,78 @@ async def test_control_plane_presets_slots_candidates_vetoes_and_isolation(
     del_preset_resp = await client.delete(f"/api/presets/{series_preset['id']}")
     assert del_preset_resp.status_code == 200
     assert del_preset_resp.json() == {"message": "Preset deleted."}
+
+
+async def test_delete_assigned_preset_nulls_only_slot_preset_id(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+) -> None:
+    provisioned = await users_service.create_user_with_login_token(session, username="del_preset_u")
+    await _login(client, provisioned.login_token)
+
+    create_resp = await client.post(
+        "/api/presets",
+        json={"name": "Assigned Movie Preset", "media_type": "movie"},
+    )
+    assert create_resp.status_code == 201
+    preset_id = create_resp.json()["id"]
+
+    assign_resp = await client.put(
+        "/api/slots/curio_movie_1",
+        json={"preset_id": preset_id},
+    )
+    assert assign_resp.status_code == 200
+    assert assign_resp.json()["preset_id"] == preset_id
+
+    del_resp = await client.delete(f"/api/presets/{preset_id}")
+    assert del_resp.status_code == 200
+
+    slots_resp = await client.get("/api/slots")
+    assert slots_resp.status_code == 200
+    movie_1 = next(s for s in slots_resp.json()["slots"] if s["slot_id"] == "curio_movie_1")
+    assert movie_1["preset_id"] is None
+    assert movie_1["preset_name"] is None
+
+
+async def test_patch_preset_partial_update_preserves_omitted_fields(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+) -> None:
+    provisioned = await users_service.create_user_with_login_token(
+        session, username="patch_preset_u"
+    )
+    await _login(client, provisioned.login_token)
+
+    create_resp = await client.post(
+        "/api/presets",
+        json={
+            "name": "Original",
+            "media_type": "movie",
+            "min_rating": 7.5,
+            "criteria": "dark sci-fi",
+        },
+    )
+    assert create_resp.status_code == 201
+    preset_id = create_resp.json()["id"]
+
+    # Omitting min_rating and criteria preserves their existing values
+    patch_resp = await client.patch(
+        f"/api/presets/{preset_id}",
+        json={"name": "Renamed"},
+    )
+    assert patch_resp.status_code == 200
+    body = patch_resp.json()
+    assert body["name"] == "Renamed"
+    assert body["min_rating"] == 7.5
+    assert body["criteria"] == "dark sci-fi"
+
+    # Explicitly passing null clears nullable fields
+    clear_resp = await client.patch(
+        f"/api/presets/{preset_id}",
+        json={"min_rating": None, "criteria": None},
+    )
+    assert clear_resp.status_code == 200
+    cleared = clear_resp.json()
+    assert cleared["name"] == "Renamed"
+    assert cleared["min_rating"] is None
+    assert cleared["criteria"] is None
