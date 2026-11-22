@@ -15,6 +15,7 @@ from sqlalchemy.pool import NullPool
 
 from curio.crypto import generate_keypair
 from curio.db.engine import to_sqlalchemy_url
+from curio.seed import seed_demo
 from curio.services import keys as keys_service
 from curio.services import users as users_service
 from curio.settings import Settings
@@ -96,6 +97,18 @@ def _cmd_keygen() -> int:
     return 0
 
 
+async def _cmd_seed_demo(database_url: str, username: str) -> int:
+    async with _open_session(database_url) as session:
+        result = await seed_demo(session, username=username)
+        await session.commit()
+
+    print(f"Seeded demo user: {result.user.username} ({result.user.id})")
+    print(f"Addon manifest path: /{result.user.addon_token}/manifest.json")
+    if result.login_token is not None:
+        print(f"Login token (save now, shown once): {result.login_token}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="curio", description="Curio operator CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -144,6 +157,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="New public key (defaults to NEW_KEY_PUBLIC_KEY env var)",
     )
 
+    p_seed = sub.add_parser(
+        "seed-demo",
+        help="Idempotently seed a demo user, sample media items, presets, and slots",
+    )
+    p_seed.add_argument(
+        "--username",
+        default="demo",
+        help="Demo username (default: demo)",
+    )
+
     return parser
 
 
@@ -183,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
                     new_public_key=args.new_public_key,
                 )
             )
+        elif args.command == "seed-demo":
+            return asyncio.run(_cmd_seed_demo(settings.database_url, args.username))
     except (
         users_service.UserAlreadyExistsError,
         users_service.UserNotFoundError,

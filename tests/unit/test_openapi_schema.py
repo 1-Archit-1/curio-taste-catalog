@@ -72,8 +72,9 @@ def test_every_control_plane_route_declares_typed_response_model():
         for method, op in operations.items():
             if method.lower() not in {"get", "post", "put", "patch", "delete"}:
                 continue
-            ok_resp = op.get("responses", {}).get("200")
-            assert ok_resp is not None, f"{method.upper()} {path} missing 200 response"
+            responses = op.get("responses", {})
+            ok_resp = responses.get("200") or responses.get("201")
+            assert ok_resp is not None, f"{method.upper()} {path} missing 200/201 response"
             json_schema = ok_resp.get("content", {}).get("application/json", {}).get("schema")
             assert json_schema is not None, f"{method.upper()} {path} missing JSON response schema"
             assert "$ref" in json_schema, (

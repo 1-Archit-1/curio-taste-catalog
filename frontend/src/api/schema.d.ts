@@ -55,6 +55,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Presets */
+        get: operations["list_presets_api_presets_get"];
+        put?: never;
+        /** Create Preset */
+        post: operations["create_preset_api_presets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/presets/{preset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Preset */
+        delete: operations["delete_preset_api_presets__preset_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Preset */
+        patch: operations["update_preset_api_presets__preset_id__patch"];
+        trace?: never;
+    };
+    "/api/presets/{preset_id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Preset Candidates */
+        get: operations["list_preset_candidates_api_presets__preset_id__candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -142,6 +195,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Slots */
+        get: operations["list_slots_api_slots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/slots/{slot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Assign Slot */
+        put: operations["assign_slot_api_slots__slot_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vetoes/{media_type}/{tmdb_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Veto */
+        put: operations["upsert_veto_api_vetoes__media_type___tmdb_id__put"];
+        post?: never;
+        /** Delete Veto */
+        delete: operations["delete_veto_api_vetoes__media_type___tmdb_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -170,6 +275,46 @@ export interface components {
         AuditLogResponse: {
             /** Entries */
             entries: components["schemas"]["AuditEntryResponse"][];
+        };
+        /** CandidateListResponse */
+        CandidateListResponse: {
+            /** Candidates */
+            candidates: components["schemas"]["CandidateOut"][];
+            /**
+             * Preset Id
+             * Format: uuid
+             */
+            preset_id: string;
+        };
+        /** CandidateOut */
+        CandidateOut: {
+            /** Blurb */
+            blurb?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Imdb Id */
+            imdb_id?: string | null;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Name */
+            name: string;
+            /** Position */
+            position: number;
+            /** Poster */
+            poster: string;
+            /** Rating */
+            rating?: number | null;
+            /** Tmdb Id */
+            tmdb_id: number;
+            /** Veto Kind */
+            veto_kind?: ("seen" | "not_for_me") | null;
+            /** Watch Status */
+            watch_status?: string | null;
+            /** Year */
+            year?: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -234,6 +379,71 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** MessageResponse */
+        MessageResponse: {
+            /** Message */
+            message: string;
+        };
+        /** PresetCreateRequest */
+        PresetCreateRequest: {
+            /** Criteria */
+            criteria?: string | null;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Min Rating */
+            min_rating?: number | null;
+            /** Name */
+            name: string;
+        };
+        /** PresetListResponse */
+        PresetListResponse: {
+            /** Presets */
+            presets: components["schemas"]["PresetOut"][];
+        };
+        /** PresetOut */
+        PresetOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Criteria */
+            criteria?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Min Rating */
+            min_rating?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PresetUpdateRequest
+         * @description Partial update: omitted fields are left unchanged; `null` clears a nullable field.
+         */
+        PresetUpdateRequest: {
+            /** Criteria */
+            criteria?: string | null;
+            /** Min Rating */
+            min_rating?: number | null;
+            /** Name */
+            name?: string;
+        };
         /** RotateAddonTokenResponse */
         RotateAddonTokenResponse: {
             /** Addon Manifest Url */
@@ -261,6 +471,32 @@ export interface components {
             user_id: string;
             /** Username */
             username: string;
+        };
+        /** SlotAssignRequest */
+        SlotAssignRequest: {
+            /** Preset Id */
+            preset_id?: string | null;
+        };
+        /** SlotListResponse */
+        SlotListResponse: {
+            /** Slots */
+            slots: components["schemas"]["SlotOut"][];
+        };
+        /** SlotOut */
+        SlotOut: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Name */
+            name: string;
+            /** Preset Id */
+            preset_id?: string | null;
+            /** Preset Name */
+            preset_name?: string | null;
+            /** Slot Id */
+            slot_id: string;
         };
         /** UpdateSettingsRequest */
         UpdateSettingsRequest: {
@@ -290,6 +526,29 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VetoOut */
+        VetoOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "seen" | "not_for_me";
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Tmdb Id */
+            tmdb_id: number;
+        };
+        /** VetoRequest */
+        VetoRequest: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "seen" | "not_for_me";
         };
     };
     responses: never;
@@ -369,6 +628,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserSummaryResponse"];
+                };
+            };
+        };
+    };
+    list_presets_api_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetListResponse"];
+                };
+            };
+        };
+    };
+    create_preset_api_presets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresetCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_preset_api_presets__preset_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_preset_api_presets__preset_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresetUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_preset_candidates_api_presets__preset_id__candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -565,6 +974,129 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_slots_api_slots_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotListResponse"];
+                };
+            };
+        };
+    };
+    assign_slot_api_slots__slot_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SlotAssignRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_veto_api_vetoes__media_type___tmdb_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                media_type: "movie" | "series";
+                tmdb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VetoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VetoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_veto_api_vetoes__media_type___tmdb_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                media_type: "movie" | "series";
+                tmdb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */

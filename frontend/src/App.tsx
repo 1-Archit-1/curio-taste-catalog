@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuthProvider } from "./auth/AuthContext";
 import { useAuth } from "./auth/useAuth";
 import { Layout } from "./components/Layout";
+import { CatalogsPage } from "./pages/CatalogsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -27,6 +28,7 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route index element={<Navigate to="/settings" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/catalogs" element={<CatalogsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/settings" replace />} />
     </Routes>

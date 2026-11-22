@@ -34,11 +34,27 @@ def test_models_register_all_expected_tables():
         "sessions",
         "user_api_keys",
         "key_decrypt_audit",
+        "media_items",
+        "presets",
+        "slots",
+        "catalog_candidates",
+        "watch_history",
+        "vetoes",
     }
 
 
 def test_per_user_tables_lead_primary_key_with_user_id():
-    for table_name in ("login_tokens", "sessions", "user_api_keys", "key_decrypt_audit"):
+    for table_name in (
+        "login_tokens",
+        "sessions",
+        "user_api_keys",
+        "key_decrypt_audit",
+        "presets",
+        "slots",
+        "catalog_candidates",
+        "watch_history",
+        "vetoes",
+    ):
         pk_cols = [col.name for col in Base.metadata.tables[table_name].primary_key.columns]
         assert pk_cols[0] == "user_id", f"{table_name} PK does not start with user_id: {pk_cols}"
 
