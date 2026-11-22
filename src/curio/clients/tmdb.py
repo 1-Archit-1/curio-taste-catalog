@@ -8,6 +8,7 @@ client. It is never logged; see `clients.redaction`.
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Literal
 
 import httpx
@@ -65,12 +66,36 @@ class TmdbTitle:
     keywords: list[str] = field(default_factory=list)
     cast: list[str] = field(default_factory=list)
     directors: list[str] = field(default_factory=list)
+    genre_ids: list[int] = field(default_factory=list)
+    keyword_ids: list[int] = field(default_factory=list)
+    vote_count: int | None = None
+    popularity: float | None = None
+    original_language: str | None = None
+    runtime: int | None = None
+    release_date: date | None = None
 
 
 def _year(date: str | None) -> int | None:
     if date and len(date) >= 4 and date[:4].isdigit():
         return int(date[:4])
     return None
+
+
+def _release_date(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def _runtime(media_type: MediaType, data: dict[str, Any]) -> int | None:
+    """Minutes. Series use the first `episode_run_time` entry. TMDB reports 0 for unknown."""
+    if media_type == "movie":
+        minutes = data.get("runtime")
+    else:
+        episode_run_time = data.get("episode_run_time")
+        minutes = episode_run_time[0] if episode_run_time else None
+    return minutes or None
 
 
 def _ref(media_type: MediaType, item: dict[str, Any]) -> TmdbRef:
@@ -204,6 +229,7 @@ def _retry_delay(resp: httpx.Response, attempt: int) -> float:
 
 def _parse_title(media_type: MediaType, data: dict[str, Any]) -> TmdbTitle:
     ref = _ref(media_type, data)
+    release = data.get("release_date") if media_type == "movie" else data.get("first_air_date")
     external = data.get("external_ids") or {}
     imdb_id = data.get("imdb_id") or external.get("imdb_id") or None
     kw = data.get("keywords") or {}
@@ -228,4 +254,11 @@ def _parse_title(media_type: MediaType, data: dict[str, Any]) -> TmdbTitle:
         keywords=[k["name"] for k in keyword_items],
         cast=[c["name"] for c in credits_.get("cast", [])[:MAX_CAST]],
         directors=directors,
+        genre_ids=[g["id"] for g in data.get("genres") or []],
+        keyword_ids=[k["id"] for k in keyword_items],
+        vote_count=vote_count,
+        popularity=data.get("popularity"),
+        original_language=data.get("original_language"),
+        runtime=_runtime(media_type, data),
+        release_date=_release_date(release),
     )

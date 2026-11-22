@@ -141,6 +141,13 @@ async def hydrate_titles(
             keywords=title.keywords,
             cast_names=title.cast,
             directors=title.directors,
+            genre_ids=title.genre_ids,
+            keyword_ids=title.keyword_ids,
+            vote_count=title.vote_count,
+            popularity=title.popularity,
+            original_language=title.original_language,
+            runtime=title.runtime,
+            release_date=title.release_date,
         )
     if first_error is not None:
         raise first_error

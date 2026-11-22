@@ -29,6 +29,21 @@ def upgrade() -> None:
                 nullable=False,
             ),
         )
+    for name in ("genre_ids", "keyword_ids"):
+        op.add_column(
+            "media_items",
+            sa.Column(
+                name,
+                sa.ARRAY(sa.Integer()),
+                server_default=sa.text("'{}'::integer[]"),
+                nullable=False,
+            ),
+        )
+    op.add_column("media_items", sa.Column("vote_count", sa.Integer(), nullable=True))
+    op.add_column("media_items", sa.Column("popularity", sa.Float(), nullable=True))
+    op.add_column("media_items", sa.Column("original_language", sa.Text(), nullable=True))
+    op.add_column("media_items", sa.Column("runtime", sa.Integer(), nullable=True))
+    op.add_column("media_items", sa.Column("release_date", sa.Date(), nullable=True))
     op.add_column(
         "media_items", sa.Column("hydrated_at", sa.DateTime(timezone=True), nullable=True)
     )
@@ -42,6 +57,13 @@ def downgrade() -> None:
     for name in (
         "embedding",
         "hydrated_at",
+        "release_date",
+        "runtime",
+        "original_language",
+        "popularity",
+        "vote_count",
+        "keyword_ids",
+        "genre_ids",
         "directors",
         "cast_names",
         "keywords",

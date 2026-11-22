@@ -1,0 +1,155 @@
+{
+  "adult": false,
+  "backdrop_path": null,
+  "belongs_to_collection": null,
+  "budget": 0,
+  "genres": [],
+  "homepage": "",
+  "id": 1836957,
+  "imdb_id": "tt27666891",
+  "origin_country": [
+    "US"
+  ],
+  "original_language": "en",
+  "original_title": "Mama Bear",
+  "overview": "Floyd's sleep is disrupted by disturbing phone calls that escalate from annoying to menacing when he realizes a doppelgänger may be nearby.",
+  "popularity": 0.0,
+  "poster_path": null,
+  "production_companies": [],
+  "production_countries": [],
+  "release_date": "",
+  "revenue": 0,
+  "runtime": 5,
+  "softcore": false,
+  "spoken_languages": [],
+  "status": "Released",
+  "tagline": "",
+  "title": "Mama Bear",
+  "video": false,
+  "vote_average": 0.0,
+  "vote_count": 0,
+  "external_ids": {
+    "imdb_id": "tt27666891",
+    "wikidata_id": null,
+    "facebook_id": null,
+    "instagram_id": null,
+    "twitter_id": null
+  },
+  "keywords": {
+    "keywords": []
+  },
+  "credits": {
+    "cast": [
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 3327172,
+        "known_for_department": "Acting",
+        "name": "Jon Lee Richardson",
+        "original_name": "Jon Lee Richardson",
+        "popularity": 0.0808,
+        "profile_path": "/yXQwAXfxMh2CPJPq6H1Axsxb5Vn.jpg",
+        "cast_id": 1,
+        "character": "Floyd",
+        "credit_id": "6b021ab49cd62d5e849c0776",
+        "order": 0
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 1411601,
+        "known_for_department": "Acting",
+        "name": "Katie Sarife",
+        "original_name": "Katie Sarife",
+        "popularity": 1.0602,
+        "profile_path": "/oQLQZ58uvGgpdtCUpOcoiF5zYJW.jpg",
+        "cast_id": 2,
+        "character": "Lacey",
+        "credit_id": "6b021ac588e12a29e23e10a7",
+        "order": 1
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 1340818,
+        "known_for_department": "Acting",
+        "name": "Ericka Kreutz",
+        "original_name": "Ericka Kreutz",
+        "popularity": 0.8167,
+        "profile_path": "/2kcf951J3dzWHFdOSbAHjfwvVPw.jpg",
+        "cast_id": 3,
+        "character": "Ms. Wilson",
+        "credit_id": "6b021ad37c2585cebe3e0962",
+        "order": 2
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 131366,
+        "known_for_department": "Acting",
+        "name": "Joshua Snyder",
+        "original_name": "Joshua Snyder",
+        "popularity": 0.4102,
+        "profile_path": "/dd3R2Z1LFnSifk1WuGdBuWRydSt.jpg",
+        "cast_id": 4,
+        "character": "Floyd Doppelgänger",
+        "credit_id": "6b021b8d0fd4e7f3ac8fae56",
+        "order": 3
+      }
+    ],
+    "crew": [
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2381985,
+        "known_for_department": "Directing",
+        "name": "Curry Barker",
+        "original_name": "Curry Barker",
+        "popularity": 2.4949,
+        "profile_path": "/A16CxGKlkQYryoxGpxzKj4Wxk83.jpg",
+        "credit_id": "6b021ba12893b51fea5951ee",
+        "department": "Directing",
+        "job": "Director"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2381985,
+        "known_for_department": "Directing",
+        "name": "Curry Barker",
+        "original_name": "Curry Barker",
+        "popularity": 2.4949,
+        "profile_path": "/A16CxGKlkQYryoxGpxzKj4Wxk83.jpg",
+        "credit_id": "6b021bafd45e67d62759524e",
+        "department": "Writing",
+        "job": "Writer"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 2381985,
+        "known_for_department": "Directing",
+        "name": "Curry Barker",
+        "original_name": "Curry Barker",
+        "popularity": 2.4949,
+        "profile_path": "/A16CxGKlkQYryoxGpxzKj4Wxk83.jpg",
+        "credit_id": "6b021bb6553d2c8fae1fa844",
+        "department": "Editing",
+        "job": "Editor"
+      },
+      {
+        "adult": false,
+        "gender": 2,
+        "id": 4653190,
+        "known_for_department": "Camera",
+        "name": "Riley Barker",
+        "original_name": "Riley Barker",
+        "popularity": 0.1371,
+        "profile_path": null,
+        "credit_id": "6b021bf6aa1e7ba725144785",
+        "department": "Camera",
+        "job": "Director of Photography"
+      }
+    ]
+  }
+}

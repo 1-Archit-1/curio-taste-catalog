@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -37,7 +38,11 @@ async def test_search_by_title_and_year(respx_mock):
     )
     async with make_client() as client:
         refs = await client.search("movie", "The Matrix", 1999)
-    assert [(r.tmdb_id, r.name, r.year) for r in refs] == [(603, "The Matrix", 1999)]
+    assert [(r.tmdb_id, r.name, r.year) for r in refs] == [
+        (603, "The Matrix", 1999),
+        (684431, 'Making "The Matrix"', 1999),
+        (684428, "The Matrix: What Is Bullet-Time?", 1999),
+    ]
     params = route.calls.last.request.url.params
     assert params["query"] == "The Matrix"
     assert params["year"] == "1999"
@@ -53,20 +58,28 @@ async def test_tv_search_uses_first_air_date_year(respx_mock):
 
 
 async def test_discover_and_recommendations(respx_mock):
-    discover = respx_mock.get(f"{BASE_URL}/discover/tv").mock(
+    discover = respx_mock.get(f"{BASE_URL}/discover/movie").mock(
         return_value=httpx.Response(200, json=fixture("discover_movie.json"))
     )
     recs = respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
         return_value=httpx.Response(200, json=fixture("recommendations_movie_603.json"))
     )
     async with make_client() as client:
-        found = await client.discover("series", with_genres="18", page=2)
+        found = await client.discover("movie", with_genres="27", sort_by="popularity.asc")
         recommended = await client.recommendations("movie", 603)
-    assert discover.calls.last.request.url.params["with_genres"] == "18"
-    assert discover.calls.last.request.url.params["page"] == "2"
-    assert [r.tmdb_id for r in found] == [603, 999]
-    assert [r.media_type for r in found] == ["series", "series"]
-    assert [r.tmdb_id for r in recommended] == [603, 999]
+    params = discover.calls.last.request.url.params
+    assert params["with_genres"] == "27"
+    assert params["sort_by"] == "popularity.asc"
+    assert params["page"] == "1"
+    assert [(r.tmdb_id, r.name, r.year) for r in found] == [
+        (1836957, "Mama Bear", 2026),
+        (1836920, "Deadline", 2026),
+    ]
+    assert [r.media_type for r in found] == ["movie", "movie"]
+    assert [(r.tmdb_id, r.name, r.year) for r in recommended] == [
+        (87101, "Terminator Genisys", 2015),
+        (777443, "The Electric State", 2025),
+    ]
     assert recs.called
 
 
@@ -81,12 +94,31 @@ async def test_hydrate_movie_uses_one_request(respx_mock):
         "external_ids,keywords,credits"
     )
     assert title.imdb_id == "tt0133093"
-    assert (title.name, title.year, title.rating) == ("The Matrix", 1999, 8.2)
-    assert title.poster_path == "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"
+    assert (title.name, title.year, title.rating) == ("The Matrix", 1999, 8.3)
+    assert title.poster_path == "/dXNAPwY7VrqMAo51EKhhCJfaGb5.jpg"
     assert title.genres == ["Action", "Science Fiction"]
-    assert title.keywords == ["artificial intelligence", "dystopia"]
-    assert title.cast == ["Keanu Reeves", "Laurence Fishburne"]
-    assert title.directors == ["Lana Wachowski"]
+    assert title.genre_ids == [28, 878]
+    assert title.keywords[:3] == ["man vs machine", "martial arts", "fortune teller"]
+    assert title.keyword_ids[:3] == [312, 779, 663]
+    assert len(title.keywords) == len(title.keyword_ids) == 19
+    assert title.cast == [
+        "Keanu Reeves",
+        "Laurence Fishburne",
+        "Carrie-Anne Moss",
+        "Hugo Weaving",
+        "Gloria Foster",
+        "Joe Pantoliano",
+        "Marcus Chong",
+        "Julian Arahanga",
+        "Matt Doran",
+        "Belinda McClory",
+    ]
+    assert title.directors == ["Lana Wachowski", "Lilly Wachowski"]
+    assert title.vote_count == 29320
+    assert title.popularity == 39.525
+    assert title.original_language == "en"
+    assert title.runtime == 136
+    assert title.release_date == date(1999, 3, 31)
 
 
 async def test_hydrate_series_reads_external_ids_and_creators(respx_mock):
@@ -98,19 +130,78 @@ async def test_hydrate_series_reads_external_ids_and_creators(respx_mock):
     assert title.imdb_id == "tt0903747"
     assert (title.name, title.year) == ("Breaking Bad", 2008)
     assert title.genres == ["Drama", "Crime"]
-    assert title.keywords == ["drug dealer"]
+    assert title.genre_ids == [18, 80]
+    assert title.keywords[:3] == ["new mexico", "drug dealer", "narcissism"]
+    assert title.keyword_ids[:3] == [1508, 2231, 5857]
+    assert len(title.keywords) == len(title.keyword_ids) == 27
     assert title.directors == ["Vince Gilligan"]
+    assert title.rating == 8.959
+    assert title.vote_count == 19166
+    assert title.popularity == 127.3355
+    assert title.original_language == "en"
+    assert title.release_date == date(2008, 1, 20)
+    # The recorded response has an empty `episode_run_time`.
+    assert title.runtime is None
+
+
+@pytest.mark.parametrize(
+    ("episode_run_time", "expected"), [([47, 60], 47), ([], None), ([0], None), (None, None)]
+)
+async def test_series_runtime_is_first_episode_run_time(respx_mock, episode_run_time, expected):
+    data = fixture("tv_1396.json")
+    data["episode_run_time"] = episode_run_time
+    respx_mock.get(f"{BASE_URL}/tv/1396").mock(return_value=httpx.Response(200, json=data))
+    async with make_client() as client:
+        title = await client.hydrate("series", 1396)
+    assert title.runtime == expected
+
+
+@pytest.mark.parametrize(("runtime", "expected"), [(0, None), (None, None), (136, 136)])
+async def test_movie_runtime_treats_zero_as_unknown(respx_mock, runtime, expected):
+    data = fixture("movie_603.json")
+    data["runtime"] = runtime
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(200, json=data))
+    async with make_client() as client:
+        title = await client.hydrate("movie", 603)
+    assert title.runtime == expected
+
+
+@pytest.mark.parametrize("value", ["", None, "not-a-date", "2026-13-45"])
+async def test_empty_or_malformed_release_date_is_none(respx_mock, value):
+    data = fixture("movie_603.json")
+    data["release_date"] = value
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(200, json=data))
+    async with make_client() as client:
+        title = await client.hydrate("movie", 603)
+    assert title.release_date is None
 
 
 async def test_hydrate_title_without_imdb_id_and_unrated(respx_mock):
-    respx_mock.get(f"{BASE_URL}/movie/999").mock(
-        return_value=httpx.Response(200, json=fixture("movie_999.json"))
+    respx_mock.get(f"{BASE_URL}/movie/1836920").mock(
+        return_value=httpx.Response(200, json=fixture("movie_1836920.json"))
     )
     async with make_client() as client:
-        title = await client.hydrate("movie", 999)
+        title = await client.hydrate("movie", 1836920)
     assert title.imdb_id is None
+    assert title.name == "Deadline"
     assert title.rating is None
-    assert title.description is None
+    assert title.vote_count == 0
+    assert title.runtime == 6
+    assert title.release_date == date(2026, 11, 20)
+    assert (title.keywords, title.keyword_ids) == ([], [])
+    assert title.genre_ids == [27, 18, 878]
+
+
+async def test_hydrate_recorded_title_with_empty_release_date(respx_mock):
+    respx_mock.get(f"{BASE_URL}/movie/1836957").mock(
+        return_value=httpx.Response(200, json=fixture("movie_1836957.json"))
+    )
+    async with make_client() as client:
+        title = await client.hydrate("movie", 1836957)
+    assert title.imdb_id == "tt27666891"
+    assert (title.release_date, title.year) == (None, None)
+    assert (title.runtime, title.popularity, title.vote_count) == (5, 0.0, 0)
+    assert title.rating is None
 
 
 async def test_hydrate_404_returns_none(respx_mock):

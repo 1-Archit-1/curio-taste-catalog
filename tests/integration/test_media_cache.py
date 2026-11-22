@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -30,8 +31,20 @@ def tmdb_routes(respx_mock):
         "movie_603": respx_mock.get(f"{BASE_URL}/movie/603").mock(
             return_value=httpx.Response(200, json=load("movie_603.json"))
         ),
-        "movie_999": respx_mock.get(f"{BASE_URL}/movie/999").mock(
-            return_value=httpx.Response(200, json=load("movie_999.json"))
+        "movie_1836920": respx_mock.get(f"{BASE_URL}/movie/1836920").mock(
+            return_value=httpx.Response(200, json=load("movie_1836920.json"))
+        ),
+        "movie_1836957": respx_mock.get(f"{BASE_URL}/movie/1836957").mock(
+            return_value=httpx.Response(200, json=load("movie_1836957.json"))
+        ),
+        "movie_87101": respx_mock.get(f"{BASE_URL}/movie/87101").mock(
+            return_value=httpx.Response(200, json=load("movie_87101.json"))
+        ),
+        "movie_777443": respx_mock.get(f"{BASE_URL}/movie/777443").mock(
+            return_value=httpx.Response(200, json=load("movie_777443.json"))
+        ),
+        "tv_1396": respx_mock.get(f"{BASE_URL}/tv/1396").mock(
+            return_value=httpx.Response(200, json=load("tv_1396.json"))
         ),
         "discover": respx_mock.get(f"{BASE_URL}/discover/movie").mock(
             return_value=httpx.Response(200, json=load("discover_movie.json"))
@@ -54,13 +67,93 @@ async def test_hydrate_stores_once_and_cache_hits_skip_tmdb(session, tmdb, tmdb_
     assert tmdb_routes["movie_603"].call_count == 1
     item = second[0]
     assert item.imdb_id == "tt0133093"
-    assert item.poster_path == "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"
-    assert item.poster_url == "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"
+    assert item.poster_path == "/dXNAPwY7VrqMAo51EKhhCJfaGb5.jpg"
+    assert item.poster_url == "https://image.tmdb.org/t/p/w500/dXNAPwY7VrqMAo51EKhhCJfaGb5.jpg"
     assert item.genres == ["Action", "Science Fiction"]
-    assert item.keywords == ["artificial intelligence", "dystopia"]
-    assert item.directors == ["Lana Wachowski"]
+    assert item.keywords[:3] == ["man vs machine", "martial arts", "fortune teller"]
+    assert item.directors == ["Lana Wachowski", "Lilly Wachowski"]
     assert item.hydrated_at is not None
     assert item.embedding is None
+
+
+async def test_hydrate_persists_movie_and_series_metadata(session, tmdb, tmdb_routes):
+    movie, series = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("series", 1396)], settings=SETTINGS
+    )
+    await session.refresh(movie)
+    await session.refresh(series)
+    assert movie.genre_ids == [28, 878]
+    assert movie.keyword_ids[:3] == [312, 779, 663]
+    assert len(movie.keyword_ids) == len(movie.keywords) == 19
+    assert movie.vote_count == 29320
+    assert movie.popularity == 39.525
+    assert movie.original_language == "en"
+    assert movie.runtime == 136
+    assert movie.release_date == date(1999, 3, 31)
+    assert movie.rating == 8.3
+    assert series.genre_ids == [18, 80]
+    assert series.keyword_ids[:3] == [1508, 2231, 5857]
+    assert series.vote_count == 19166
+    assert series.original_language == "en"
+    assert series.runtime is None  # the recorded response has an empty episode_run_time
+    assert series.release_date == date(2008, 1, 20)
+    assert series.year == 2008
+
+
+async def test_hydrate_stores_nulls_and_empty_arrays_for_sparse_title(session, tmdb, tmdb_routes):
+    [item] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 1836957)], settings=SETTINGS
+    )
+    await session.refresh(item)
+    assert item.release_date is None
+    assert item.year is None
+    assert (item.genre_ids, item.keyword_ids) == ([], [])
+    assert (item.vote_count, item.popularity, item.runtime) == (0, 0.0, 5)
+
+
+async def test_second_upsert_refreshes_new_columns(session):
+    fields = dict(
+        media_type="movie",
+        tmdb_id=603,
+        imdb_id="tt0133093",
+        name="The Matrix",
+        year=1999,
+        description=None,
+        rating=8.3,
+        poster_path=None,
+        poster_url=None,
+        genres=["Action"],
+        keywords=["dystopia"],
+        cast_names=[],
+        directors=[],
+    )
+    await media_repo.upsert_hydrated(
+        session,
+        **fields,
+        genre_ids=[28],
+        keyword_ids=[4565],
+        vote_count=100,
+        popularity=1.5,
+        original_language="en",
+        runtime=120,
+        release_date=date(1999, 3, 31),
+    )
+    item = await media_repo.upsert_hydrated(
+        session,
+        **fields,
+        genre_ids=[28, 878],
+        keyword_ids=[4565, 310],
+        vote_count=250,
+        popularity=2.5,
+        original_language="fr",
+        runtime=None,
+        release_date=None,
+    )
+    await session.refresh(item)
+    assert item.genre_ids == [28, 878]
+    assert item.keyword_ids == [4565, 310]
+    assert (item.vote_count, item.popularity, item.original_language) == (250, 2.5, "fr")
+    assert (item.runtime, item.release_date) == (None, None)
 
 
 async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(session, tmdb, tmdb_routes):
@@ -75,18 +168,18 @@ async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(session,
 
 async def test_discover_drops_titles_without_imdb_id_but_caches_them(session, tmdb, tmdb_routes):
     items = await media_service.discover_titles(session, tmdb, "movie", settings=SETTINGS)
-    assert [i.tmdb_id for i in items] == [603]
+    assert [i.tmdb_id for i in items] == [1836957]
     # The IMDb-less title is cached, so it is not hydrated again.
     await media_service.discover_titles(session, tmdb, "movie", settings=SETTINGS)
-    assert tmdb_routes["movie_999"].call_count == 1
+    assert tmdb_routes["movie_1836920"].call_count == 1
 
 
-async def test_recommend_titles_filters_and_hydrates(session, tmdb, tmdb_routes, respx_mock):
+async def test_recommend_titles_hydrates_in_order(session, tmdb, tmdb_routes, respx_mock):
     respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
         return_value=httpx.Response(200, json=load("recommendations_movie_603.json"))
     )
     items = await media_service.recommend_titles(session, tmdb, "movie", 603, settings=SETTINGS)
-    assert [i.imdb_id for i in items] == ["tt0133093"]
+    assert [i.imdb_id for i in items] == ["tt1340138", "tt7766378"]
 
 
 async def test_missing_title_is_skipped(session, tmdb, respx_mock):
@@ -99,7 +192,7 @@ async def test_missing_title_is_skipped(session, tmdb, respx_mock):
 
 async def test_embed_missing_stores_normalized_vectors_once(session, tmdb, tmdb_routes, respx_mock):
     await media_service.hydrate_titles(
-        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 999)], settings=SETTINGS
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 1836920)], settings=SETTINGS
     )
 
     def reply(request: httpx.Request) -> httpx.Response:
@@ -112,7 +205,7 @@ async def test_embed_missing_stores_normalized_vectors_once(session, tmdb, tmdb_
         f"{GEMINI_URL}/models/{SETTINGS.embedding_model}:batchEmbedContents"
     ).mock(side_effect=reply)
     embedder = GeminiEmbedder("gemini-key", SETTINGS.embedding_model)
-    keys = [("movie", 603), ("movie", 999)]
+    keys = [("movie", 603), ("movie", 1836920)]
 
     assert await media_service.embed_missing(session, embedder, keys) == 2
     # Second call finds nothing missing, so Gemini is not called again.
@@ -120,7 +213,9 @@ async def test_embed_missing_stores_normalized_vectors_once(session, tmdb, tmdb_
     await embedder.aclose()
     assert gemini.call_count == 1
 
-    rows = (await session.scalars(select(MediaItem).where(MediaItem.tmdb_id.in_([603, 999])))).all()
+    rows = (
+        await session.scalars(select(MediaItem).where(MediaItem.tmdb_id.in_([603, 1836920])))
+    ).all()
     for row in rows:
         await session.refresh(row)
         assert len(row.embedding) == EMBEDDING_DIMENSIONS
@@ -217,12 +312,12 @@ async def test_imdb_id_collision_keeps_metadata_without_poisoning_transaction(
     session.add(MediaItem(media_type="movie", tmdb_id=1, imdb_id="tt0133093", name="Other"))
     await session.flush()
     items = await media_service.hydrate_titles(
-        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 999)], settings=SETTINGS
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 1836920)], settings=SETTINGS
     )
     by_id = {i.tmdb_id: i for i in items}
     assert by_id[603].imdb_id is None
     assert by_id[603].name == "The Matrix"
-    assert by_id[999].name == "Obscure Short"
+    assert by_id[1836920].name == "Deadline"
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("movie 603" in m and "tt0133093" in m for m in warnings)
     # The session is still usable.
@@ -246,18 +341,18 @@ async def test_embeddings_stored_per_batch_and_never_overwritten(
     session, tmdb, tmdb_routes, respx_mock
 ):
     await media_service.hydrate_titles(
-        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 999)], settings=SETTINGS
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 1836920)], settings=SETTINGS
     )
     ok = httpx.Response(200, json={"embeddings": [{"values": [1.0] * EMBEDDING_DIMENSIONS}]})
     respx_mock.post(f"{GEMINI_URL}/models/{SETTINGS.embedding_model}:batchEmbedContents").mock(
         side_effect=[ok, httpx.Response(400)]
     )
-    keys = [("movie", 603), ("movie", 999)]
+    keys = [("movie", 603), ("movie", 1836920)]
     async with GeminiEmbedder("k", SETTINGS.embedding_model, batch_size=1) as embedder:
         with pytest.raises(EmbeddingError):
             await media_service.embed_missing(session, embedder, keys)
     first = await session.get(MediaItem, ("movie", 603))
-    second = await session.get(MediaItem, ("movie", 999))
+    second = await session.get(MediaItem, ("movie", 1836920))
     await session.refresh(first)
     await session.refresh(second)
     assert first.embedding is not None  # the first batch survived the second batch's failure

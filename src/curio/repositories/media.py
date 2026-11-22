@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Sequence
+from datetime import date
 
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -46,6 +47,13 @@ async def upsert_hydrated(
     keywords: list[str],
     cast_names: list[str],
     directors: list[str],
+    genre_ids: list[int],
+    keyword_ids: list[int],
+    vote_count: int | None,
+    popularity: float | None,
+    original_language: str | None,
+    runtime: int | None,
+    release_date: date | None,
 ) -> MediaItem:
     values = {
         "imdb_id": imdb_id,
@@ -59,6 +67,13 @@ async def upsert_hydrated(
         "keywords": keywords,
         "cast_names": cast_names,
         "directors": directors,
+        "genre_ids": genre_ids,
+        "keyword_ids": keyword_ids,
+        "vote_count": vote_count,
+        "popularity": popularity,
+        "original_language": original_language,
+        "runtime": runtime,
+        "release_date": release_date,
         "hydrated_at": func.now(),
         "updated_at": func.now(),
     }
