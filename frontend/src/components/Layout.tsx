@@ -29,6 +29,14 @@ export function Layout() {
           >
             Settings
           </NavLink>
+          <NavLink
+            to="/catalogs"
+            className={({ isActive }) =>
+              isActive ? `${styles.tab} ${styles.tabActive}` : styles.tab
+            }
+          >
+            Catalogs
+          </NavLink>
         </nav>
         <Outlet />
       </main>

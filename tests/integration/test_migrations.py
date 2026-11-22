@@ -36,7 +36,7 @@ def test_migrations_apply_to_empty_database_and_are_idempotent(empty_database_ur
     with psycopg.connect(empty_database_url) as conn:
         versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
         has_vector = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
-    assert versions == ["0001"]
+    assert versions == ["0002"]
     assert has_vector is not None
 
 
@@ -57,4 +57,4 @@ def test_concurrent_runs_apply_each_migration_once(empty_database_url):
 
     with psycopg.connect(empty_database_url) as conn:
         versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
-    assert versions == ["0001"]
+    assert versions == ["0002"]
