@@ -63,9 +63,7 @@ async def test_hydrate_stores_once_and_cache_hits_skip_tmdb(session, tmdb, tmdb_
     assert item.embedding is None
 
 
-async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(
-    session, tmdb, tmdb_routes
-):
+async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(session, tmdb, tmdb_routes):
     session.add(MediaItem(media_type="movie", tmdb_id=603, name="Seed placeholder"))
     await session.flush()
     [item] = await media_service.hydrate_titles(
@@ -75,9 +73,7 @@ async def test_unhydrated_seed_row_is_hydrated_not_treated_as_cache_hit(
     assert tmdb_routes["movie_603"].call_count == 1
 
 
-async def test_discover_drops_titles_without_imdb_id_but_caches_them(
-    session, tmdb, tmdb_routes
-):
+async def test_discover_drops_titles_without_imdb_id_but_caches_them(session, tmdb, tmdb_routes):
     items = await media_service.discover_titles(session, tmdb, "movie", settings=SETTINGS)
     assert [i.tmdb_id for i in items] == [603]
     # The IMDb-less title is cached, so it is not hydrated again.
@@ -101,9 +97,7 @@ async def test_missing_title_is_skipped(session, tmdb, respx_mock):
     assert items == []
 
 
-async def test_embed_missing_stores_normalized_vectors_once(
-    session, tmdb, tmdb_routes, respx_mock
-):
+async def test_embed_missing_stores_normalized_vectors_once(session, tmdb, tmdb_routes, respx_mock):
     await media_service.hydrate_titles(
         session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 999)], settings=SETTINGS
     )
@@ -255,9 +249,9 @@ async def test_embeddings_stored_per_batch_and_never_overwritten(
         session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 999)], settings=SETTINGS
     )
     ok = httpx.Response(200, json={"embeddings": [{"values": [1.0] * EMBEDDING_DIMENSIONS}]})
-    respx_mock.post(
-        f"{GEMINI_URL}/models/{SETTINGS.embedding_model}:batchEmbedContents"
-    ).mock(side_effect=[ok, httpx.Response(400)])
+    respx_mock.post(f"{GEMINI_URL}/models/{SETTINGS.embedding_model}:batchEmbedContents").mock(
+        side_effect=[ok, httpx.Response(400)]
+    )
     keys = [("movie", 603), ("movie", 999)]
     async with GeminiEmbedder("k", SETTINGS.embedding_model, batch_size=1) as embedder:
         with pytest.raises(EmbeddingError):

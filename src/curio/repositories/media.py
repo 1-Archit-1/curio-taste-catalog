@@ -1,4 +1,5 @@
 """Shared media cache persistence (`media_items`)."""
+
 import logging
 from collections.abc import Sequence
 

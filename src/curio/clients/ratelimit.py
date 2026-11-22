@@ -1,4 +1,5 @@
 """Per-process async rate limiter: spaces requests at least `1 / rate` seconds apart."""
+
 import asyncio
 import time
 from collections.abc import Awaitable, Callable

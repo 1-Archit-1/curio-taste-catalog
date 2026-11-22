@@ -4,6 +4,7 @@ Rules (docs/architecture.md & ADR 0002): httpx only, never the database. The key
 by the caller (obtained through `services.keys.get_tmdb_key`) and goes straight into the HTTP
 client. It is never logged; see `clients.redaction`.
 """
+
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -162,9 +163,7 @@ class TmdbClient:
         self, media_type: MediaType, *, page: int = 1, **filters: Any
     ) -> list[TmdbRef]:
         """`filters` are passed through as TMDB discover query parameters."""
-        data = await self._get(
-            f"/discover/{_TMDB_PATH[media_type]}", {**filters, "page": page}
-        )
+        data = await self._get(f"/discover/{_TMDB_PATH[media_type]}", {**filters, "page": page})
         return _refs(media_type, data)
 
     async def recommendations(

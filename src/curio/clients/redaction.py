@@ -4,6 +4,7 @@ httpx logs every request URL at INFO, and TMDB v3 keys travel as an `api_key` qu
 httpcore logs request headers at DEBUG. `install_log_redaction` scrubs the first and silences
 the second.
 """
+
 import logging
 import re
 

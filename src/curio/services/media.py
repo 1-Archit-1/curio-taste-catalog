@@ -5,6 +5,7 @@ cached `media_items` rows, calling TMDB only for refs not yet hydrated. Rows wit
 are stored (so they are never refetched, and history can still reference them; ADR 0007) but
 `discover_titles` and `recommend_titles` drop them, since they can't be served to Stremio.
 """
+
 import asyncio
 from collections.abc import Iterable, Sequence
 from uuid import UUID

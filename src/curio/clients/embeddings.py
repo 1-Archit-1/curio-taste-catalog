@@ -3,6 +3,7 @@
 Gemini returns unnormalized vectors when `outputDimensionality` is below the native size, so
 normalization happens here. The key goes in a header (never the URL) and is never logged.
 """
+
 import asyncio
 import math
 from collections.abc import Awaitable, Callable, Sequence

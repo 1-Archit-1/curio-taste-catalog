@@ -56,18 +56,10 @@ class MediaItem(Base):
     # Filled by TMDB hydration (#4). `hydrated_at` is NULL until then; hydrated rows are
     # cache hits and never fetched again.
     poster_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    genres: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'::text[]")
-    )
-    keywords: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'::text[]")
-    )
-    cast_names: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'::text[]")
-    )
-    directors: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'::text[]")
-    )
+    genres: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    cast_names: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    directors: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
     hydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # gemini-embedding-001 reduced to 768 dimensions and L2-normalized.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
