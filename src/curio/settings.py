@@ -23,3 +23,4 @@ class Settings(BaseSettings):
     session_ttl_days: int = 30
     session_cookie_secure: bool = False
     public_base_url: str | None = None
+    frontend_dist_dir: str | None = None
