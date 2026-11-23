@@ -62,7 +62,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Job Status */
+        /**
+         * Get Job Status
+         * @description Return a single job with its run summary and recorded step events.
+         */
         get: operations["get_job_status_api_jobs__job_id__get"];
         put?: never;
         post?: never;
@@ -79,7 +82,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Stream Job Events */
+        /**
+         * Stream Job Events
+         * @description Stream live job progress over SSE using Postgres LISTEN/NOTIFY.
+         *
+         *     Replays any already-committed `run_events` first so steps emitted before the
+         *     browser connected are never lost, then wakes on `NOTIFY` until the job ends.
+         */
         get: operations["stream_job_events_api_jobs__job_id__events_get"];
         put?: never;
         post?: never;
@@ -149,7 +158,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Latest Preset Job */
+        /**
+         * Get Latest Preset Job
+         * @description Return the most recent job, run, and step events for a preset.
+         */
         get: operations["get_latest_preset_job_api_presets__preset_id__jobs_latest_get"];
         put?: never;
         post?: never;
@@ -168,7 +180,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Regenerate Preset */
+        /**
+         * Regenerate Preset
+         * @description Enqueue a background `regenerate` job for the preset (409 if one is already active).
+         */
         post: operations["regenerate_preset_api_presets__preset_id__regenerate_post"];
         delete?: never;
         options?: never;
