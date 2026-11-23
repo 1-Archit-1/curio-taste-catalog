@@ -18,11 +18,13 @@ from curio.db.models.catalogs import (  # noqa: E402
 )
 from curio.db.models.jobs import Job, Run, RunEvent  # noqa: E402
 from curio.db.models.keys import KeyDecryptAudit, UserApiKey  # noqa: E402
+from curio.db.models.sources import ImportIssue, Source, SourceItem, UserSource  # noqa: E402
 from curio.db.models.users import LoginToken, Session, User  # noqa: E402
 
 __all__ = [
     "Base",
     "CatalogCandidate",
+    "ImportIssue",
     "Job",
     "KeyDecryptAudit",
     "LoginToken",
@@ -33,8 +35,11 @@ __all__ = [
     "ServedTitle",
     "Session",
     "Slot",
+    "Source",
+    "SourceItem",
     "User",
     "UserApiKey",
+    "UserSource",
     "Veto",
     "WatchHistory",
 ]

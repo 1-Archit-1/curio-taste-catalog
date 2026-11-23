@@ -1,0 +1,116 @@
+.sourceRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sourceRow:last-child {
+  border-bottom: none;
+}
+
+.sourceInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  flex: 1 1 280px;
+}
+
+.sourceTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.kindBadge {
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--muted);
+}
+
+.sourceMeta {
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sourceActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.previewBox {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.previewList {
+  margin: 8px 0 12px;
+  padding-left: 18px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.issueCard {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issueCard:last-child {
+  border-bottom: none;
+}
+
+.issueHeader {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.candidateList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.manualResolve {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tmdbInput {
+  width: 140px;
+}
+
+.errorText {
+  color: var(--err);
+  font-size: 0.82rem;
+}
+
+.emptyState {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+}

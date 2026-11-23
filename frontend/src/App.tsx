@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout";
 import { CatalogsPage } from "./pages/CatalogsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SourcesPage } from "./pages/SourcesPage";
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -29,6 +30,7 @@ export function AppRoutes() {
         <Route index element={<Navigate to="/settings" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/catalogs" element={<CatalogsPage />} />
+        <Route path="/sources" element={<SourcesPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/settings" replace />} />
     </Routes>

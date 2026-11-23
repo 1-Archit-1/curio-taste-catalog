@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:letterboxd="https://letterboxd.com"
+     xmlns:tmdb="https://themoviedb.org">
+  <channel>
+    <title>Letterboxd - alice</title>
+    <link>https://letterboxd.com/alice/</link>
+    <description>Letterboxd — alice's diary</description>
+    <item>
+      <title>The Matrix, 1999 - ★★★★★</title>
+      <link>https://letterboxd.com/alice/film/the-matrix/</link>
+      <guid isPermaLink="false">letterboxd-diary-1001</guid>
+      <pubDate>Fri, 15 Nov 2026 12:00:00 +1300</pubDate>
+      <letterboxd:watchedDate>2026-11-14</letterboxd:watchedDate>
+      <letterboxd:rewatch>No</letterboxd:rewatch>
+      <letterboxd:filmTitle>The Matrix</letterboxd:filmTitle>
+      <letterboxd:filmYear>1999</letterboxd:filmYear>
+      <letterboxd:memberRating>5.0</letterboxd:memberRating>
+      <tmdb:movieId>603</tmdb:movieId>
+      <dc:creator>alice</dc:creator>
+    </item>
+    <item>
+      <title>Breaking Bad, 2008 - ★★★★½</title>
+      <link>https://letterboxd.com/alice/film/breaking-bad/</link>
+      <guid isPermaLink="false">letterboxd-diary-1002</guid>
+      <pubDate>Thu, 14 Nov 2026 12:00:00 +1300</pubDate>
+      <letterboxd:watchedDate>2026-11-13</letterboxd:watchedDate>
+      <letterboxd:rewatch>No</letterboxd:rewatch>
+      <letterboxd:filmTitle>Breaking Bad</letterboxd:filmTitle>
+      <letterboxd:filmYear>2008</letterboxd:filmYear>
+      <letterboxd:memberRating>4.5</letterboxd:memberRating>
+      <tmdb:tvId>1396</tmdb:tvId>
+      <dc:creator>alice</dc:creator>
+    </item>
+  </channel>
+</rss>
