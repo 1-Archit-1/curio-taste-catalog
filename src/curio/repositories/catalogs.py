@@ -1,5 +1,6 @@
 """Catalog, preset, slot, watch-history, and veto persistence using SQLAlchemy 2.0."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -24,6 +25,7 @@ from curio.db.models.catalogs import (
     CatalogCandidate,
     MediaItem,
     Preset,
+    ServedTitle,
     Slot,
     Veto,
     WatchHistory,
@@ -94,6 +96,8 @@ class CandidateRow:
 
 @dataclass(frozen=True)
 class CatalogItemRow:
+    preset_id: UUID
+    tmdb_id: int
     imdb_id: str
     media_type: str
     name: str
@@ -395,6 +399,8 @@ async def query_slot_catalog(
 
     stmt = (
         select(
+            CatalogCandidate.preset_id,
+            MediaItem.tmdb_id,
             MediaItem.imdb_id,
             MediaItem.media_type,
             MediaItem.name,
@@ -426,6 +432,8 @@ async def query_slot_catalog(
     rows = (await session.execute(stmt)).all()
     return [
         CatalogItemRow(
+            preset_id=row.preset_id,
+            tmdb_id=row.tmdb_id,
             imdb_id=cast(str, row.imdb_id),
             media_type=row.media_type,
             name=row.name,
@@ -600,5 +608,110 @@ async def insert_vetoes_ignore_conflicts(
         postgresql.insert(Veto)
         .values(rows)
         .on_conflict_do_nothing(index_elements=["user_id", "media_type", "tmdb_id"])
+    )
+    await session.execute(stmt)
+
+
+async def list_top_rated_watched_titles(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    media_type: MediaType,
+    limit: int = 5,
+) -> list[int]:
+    rated_stmt = (
+        select(WatchHistory.tmdb_id)
+        .where(
+            WatchHistory.user_id == user_id,
+            WatchHistory.media_type == media_type,
+            WatchHistory.status == "watched",
+            WatchHistory.rating.is_not(None),
+        )
+        .order_by(
+            WatchHistory.rating.desc(),
+            WatchHistory.watched_at.desc().nullslast(),
+            WatchHistory.tmdb_id.asc(),
+        )
+        .limit(limit)
+    )
+    tmdb_ids = list((await session.execute(rated_stmt)).scalars().all())
+    if tmdb_ids:
+        return tmdb_ids
+
+    fallback_stmt = (
+        select(WatchHistory.tmdb_id)
+        .where(
+            WatchHistory.user_id == user_id,
+            WatchHistory.media_type == media_type,
+            WatchHistory.status == "watched",
+        )
+        .order_by(
+            WatchHistory.watched_at.desc().nullslast(),
+            WatchHistory.tmdb_id.asc(),
+        )
+        .limit(limit)
+    )
+    return list((await session.execute(fallback_stmt)).scalars().all())
+
+
+async def replace_preset_candidates(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    preset_id: UUID,
+    items: Sequence[tuple[str, int]],
+) -> int:
+    await session.execute(
+        delete(CatalogCandidate).where(
+            CatalogCandidate.user_id == user_id,
+            CatalogCandidate.preset_id == preset_id,
+        )
+    )
+    if not items:
+        return 0
+    rows = [
+        {
+            "user_id": user_id,
+            "preset_id": preset_id,
+            "media_type": media_type,
+            "tmdb_id": tmdb_id,
+            "position": idx,
+        }
+        for idx, (media_type, tmdb_id) in enumerate(items)
+    ]
+    await session.execute(insert(CatalogCandidate).values(rows))
+    return len(rows)
+
+
+async def record_served_titles(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    items: Sequence[tuple[UUID, str, int]],
+) -> None:
+    unique_items = list(dict.fromkeys(items))
+    if not unique_items:
+        return
+    rows = [
+        {
+            "user_id": user_id,
+            "preset_id": preset_id,
+            "media_type": media_type,
+            "tmdb_id": tmdb_id,
+        }
+        for preset_id, media_type, tmdb_id in unique_items
+    ]
+    insert_stmt = postgresql.insert(ServedTitle).values(rows)
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=[
+            ServedTitle.user_id,
+            ServedTitle.preset_id,
+            ServedTitle.media_type,
+            ServedTitle.tmdb_id,
+        ],
+        set_={
+            "last_served_at": func.now(),
+            "serve_count": ServedTitle.serve_count + 1,
+        },
     )
     await session.execute(stmt)

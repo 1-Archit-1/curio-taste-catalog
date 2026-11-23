@@ -81,3 +81,18 @@ async def update_user_settings(
         .execution_options(populate_existing=True)
     )
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def set_jobs_paused_reason(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    reason: str | None,
+) -> None:
+    """Update `users.jobs_paused_reason` for `user_id`."""
+    stmt = (
+        update(User)
+        .where(User.id == user_id)
+        .values(jobs_paused_reason=reason, updated_at=func.now())
+    )
+    await session.execute(stmt)

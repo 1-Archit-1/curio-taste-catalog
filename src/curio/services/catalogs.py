@@ -1,9 +1,11 @@
 """Catalog, preset, slot, veto, and Stremio addon protocol business logic."""
 
+import logging
+from collections.abc import Sequence
 from urllib.parse import unquote
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from curio.db.models.catalogs import Preset, Veto
 from curio.repositories import catalogs as catalogs_repo
@@ -22,6 +24,7 @@ from curio.repositories.catalogs import (
 
 VALID_MEDIA_TYPES = frozenset({"movie", "series"})
 VALID_VETO_KINDS = frozenset({"seen", "not_for_me"})
+log = logging.getLogger(__name__)
 
 __all__ = [
     "FIXED_SLOTS",
@@ -42,6 +45,7 @@ __all__ = [
     "list_slots",
     "parse_skip_extra",
     "query_slot_catalog",
+    "record_served_titles_best_effort",
     "resolve_poster_url",
     "update_preset",
     "upsert_veto",
@@ -274,3 +278,20 @@ async def list_anti_taste(
     user_id: UUID,
 ) -> list[AntiTasteRow]:
     return await catalogs_repo.list_anti_taste(session, user_id=user_id)
+
+
+async def record_served_titles_best_effort(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    user_id: UUID,
+    items: Sequence[tuple[UUID, str, int]],
+) -> None:
+    """Persist served-title counts on a fresh session, logging and swallowing errors."""
+    if not items:
+        return
+    try:
+        async with session_factory() as session:
+            await catalogs_repo.record_served_titles(session, user_id=user_id, items=items)
+            await session.commit()
+    except Exception:
+        log.warning("failed to record served titles for user %s", user_id, exc_info=True)

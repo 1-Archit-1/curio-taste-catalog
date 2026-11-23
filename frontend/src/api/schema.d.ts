@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job Status */
+        get: operations["get_job_status_api_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream Job Events */
+        get: operations["stream_job_events_api_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/presets": {
         parameters: {
             query?: never;
@@ -102,6 +136,40 @@ export interface paths {
         get: operations["list_preset_candidates_api_presets__preset_id__candidates_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/presets/{preset_id}/jobs/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Latest Preset Job */
+        get: operations["get_latest_preset_job_api_presets__preset_id__jobs_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/presets/{preset_id}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate Preset */
+        post: operations["regenerate_preset_api_presets__preset_id__regenerate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -321,6 +389,42 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** JobOut */
+        JobOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Job Kind */
+            job_kind: string;
+            /** Last Error */
+            last_error?: string | null;
+            /** Paused Key Type */
+            paused_key_type?: string | null;
+            /** Paused Reason */
+            paused_reason?: string | null;
+            /** Preset Id */
+            preset_id?: string | null;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
+        };
+        /** JobStatusResponse */
+        JobStatusResponse: {
+            /** Events */
+            events?: components["schemas"]["RunEventOut"][];
+            job: components["schemas"]["JobOut"];
+            run?: components["schemas"]["RunOut"] | null;
+        };
         /** KeyDeletedResponse */
         KeyDeletedResponse: {
             /** Deleted */
@@ -348,6 +452,8 @@ export interface components {
             configured: boolean;
             /** Last4 */
             last4?: string | null;
+            /** Paused Reason */
+            paused_reason?: string | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -365,6 +471,13 @@ export interface components {
          * @enum {string}
          */
         KeyType: "tmdb" | "gemini" | "openai" | "anthropic" | "openrouter";
+        /** LatestPresetJobResponse */
+        LatestPresetJobResponse: {
+            /** Events */
+            events?: components["schemas"]["RunEventOut"][];
+            job?: components["schemas"]["JobOut"] | null;
+            run?: components["schemas"]["RunOut"] | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Token */
@@ -448,6 +561,49 @@ export interface components {
         RotateAddonTokenResponse: {
             /** Addon Manifest Url */
             addon_manifest_url: string;
+        };
+        /** RunEventOut */
+        RunEventOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Message */
+            message: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Step */
+            step: string;
+        };
+        /** RunOut */
+        RunOut: {
+            /** Error */
+            error?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Pipeline */
+            pipeline: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Trigger */
+            trigger: string;
         };
         /** SettingsResponse */
         SettingsResponse: {
@@ -632,6 +788,68 @@ export interface operations {
             };
         };
     };
+    get_job_status_api_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_job_events_api_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_presets_api_presets_get: {
         parameters: {
             query?: never;
@@ -769,6 +987,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidateListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_preset_job_api_presets__preset_id__jobs_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestPresetJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_preset_api_presets__preset_id__regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
             /** @description Validation Error */

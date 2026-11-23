@@ -21,6 +21,7 @@ from curio.clients.providers import (
 )
 from curio.crypto import KeyDecryptor, KeyEncryptor, mask_last4
 from curio.db.models.keys import KeyDecryptAudit
+from curio.repositories import jobs as jobs_repo
 from curio.repositories import keys as keys_repo
 from curio.repositories import users as users_repo
 from curio.repositories.keys import ApiKeyMetadataRow
@@ -64,13 +65,15 @@ async def set_user_api_key(
     ciphertext = encryptor.encrypt(cleaned)
     last4 = mask_last4(cleaned)
 
-    return await keys_repo.upsert_api_key(
+    row = await keys_repo.upsert_api_key(
         session,
         user_id=user_id,
         key_type=key_type.value,
         encrypted_key=ciphertext,
         last4=last4,
     )
+    await resume_key_and_jobs(session, user_id=user_id, key_type=key_type)
+    return row
 
 
 async def list_user_key_metadata(
@@ -223,3 +226,53 @@ async def rotate_all_keys(
                 reason="rotation",
             )
     return len(rows)
+
+
+async def pause_key_and_jobs(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    key_type: KeyType,
+    reason: str,
+) -> list[UUID]:
+    """Pause `key_type` for `user_id`, pause dependent jobs, and update `jobs_paused_reason`."""
+    await keys_repo.set_key_paused(
+        session,
+        user_id=user_id,
+        key_type=key_type.value,
+        reason=reason,
+    )
+    paused_ids = await jobs_repo.pause_user_jobs_for_key(
+        session,
+        user_id=user_id,
+        key_type=key_type.value,
+        reason=reason,
+    )
+    paused_keys = await keys_repo.list_paused_keys(session, user_id=user_id)
+    combined_reason = "; ".join(f"{kt}: {r}" for kt, r in paused_keys) if paused_keys else reason
+    await users_repo.set_jobs_paused_reason(session, user_id=user_id, reason=combined_reason)
+    return paused_ids
+
+
+async def resume_key_and_jobs(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    key_type: KeyType,
+) -> list[UUID]:
+    """Clear pause on `key_type`, requeue jobs paused on it, and recompute `jobs_paused_reason`."""
+    await keys_repo.set_key_paused(
+        session,
+        user_id=user_id,
+        key_type=key_type.value,
+        reason=None,
+    )
+    resumed_ids = await jobs_repo.resume_user_jobs_for_key(
+        session,
+        user_id=user_id,
+        key_type=key_type.value,
+    )
+    paused_keys = await keys_repo.list_paused_keys(session, user_id=user_id)
+    remaining_reason = "; ".join(f"{kt}: {r}" for kt, r in paused_keys) if paused_keys else None
+    await users_repo.set_jobs_paused_reason(session, user_id=user_id, reason=remaining_reason)
+    return resumed_ids

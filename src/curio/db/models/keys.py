@@ -35,6 +35,8 @@ class UserApiKey(Base):
     key_type: Mapped[str] = mapped_column(Text, primary_key=True)
     encrypted_key: Mapped[bytes] = mapped_column(LargeBinary)
     last4: Mapped[str] = mapped_column(Text)
+    paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),

@@ -131,6 +131,7 @@ def keypair() -> Keypair:
 @pytest.fixture
 async def client(
     session: AsyncSession,
+    audit_session_factory: async_sessionmaker[AsyncSession],
     migrated_database_url: str,
     keypair: Keypair,
 ) -> AsyncIterator[httpx.AsyncClient]:
@@ -147,6 +148,7 @@ async def client(
             key_private_key=None,
         )
     )
+    app.state.session_factory = audit_session_factory
 
     async def test_session() -> AsyncIterator[AsyncSession]:
         yield session

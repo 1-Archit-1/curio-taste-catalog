@@ -7,6 +7,8 @@ type SlotOut = components["schemas"]["SlotOut"];
 type PresetOut = components["schemas"]["PresetOut"];
 type CandidateOut = components["schemas"]["CandidateOut"];
 type VetoOut = components["schemas"]["VetoOut"];
+type JobOut = components["schemas"]["JobOut"];
+type RunEventOut = components["schemas"]["RunEventOut"];
 type MediaType = PresetOut["media_type"];
 type VetoKind = VetoOut["kind"];
 
@@ -52,6 +54,14 @@ export function CatalogsPage() {
   const [candidates, setCandidates] = useState<CandidateOut[]>([]);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
 
+  const [tmdbConfigured, setTmdbConfigured] = useState(false);
+  const [tmdbPausedReason, setTmdbPausedReason] = useState<string | null>(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [activeJob, setActiveJob] = useState<JobOut | null>(null);
+  const [jobEvents, setJobEvents] = useState<RunEventOut[]>([]);
+  const [submittingRegenerate, setSubmittingRegenerate] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+
   const [loadError, setLoadError] = useState<string | null>(null);
   const [slotStatus, setSlotStatus] = useState<StatusMessage>({
     text: "",
@@ -94,10 +104,20 @@ export function CatalogsPage() {
     }
   }, []);
 
+  const refreshSettings = useCallback(async () => {
+    const { data, response } = await apiClient.GET("/api/settings");
+    if (response.ok && data) {
+      setTmdbConfigured(data.keys.tmdb?.configured ?? false);
+      setTmdbPausedReason(data.keys.tmdb?.paused_reason ?? null);
+      setSettingsLoaded(true);
+    }
+  }, []);
+
   const loadInitial = useCallback(async () => {
-    const [slotsRes, presetsRes] = await Promise.all([
+    const [slotsRes, presetsRes, settingsRes] = await Promise.all([
       apiClient.GET("/api/slots"),
       apiClient.GET("/api/presets"),
+      apiClient.GET("/api/settings"),
     ]);
 
     if (!slotsRes.response.ok) {
@@ -115,6 +135,12 @@ export function CatalogsPage() {
         );
       }
       return;
+    }
+
+    if (settingsRes.response.ok && settingsRes.data) {
+      setTmdbConfigured(settingsRes.data.keys.tmdb?.configured ?? false);
+      setTmdbPausedReason(settingsRes.data.keys.tmdb?.paused_reason ?? null);
+      setSettingsLoaded(true);
     }
 
     const loadedSlots = slotsRes.data?.slots ?? [];
@@ -136,10 +162,113 @@ export function CatalogsPage() {
   useEffect(() => {
     if (!selectedPresetId) {
       setCandidates([]);
+      setActiveJob(null);
+      setJobEvents([]);
+      setRegenerateError(null);
       return;
     }
+    let cancelled = false;
+    setActiveJob(null);
+    setJobEvents([]);
+    setRegenerateError(null);
     void loadCandidates(selectedPresetId);
+    void (async () => {
+      const { data, response } = await apiClient.GET(
+        "/api/presets/{preset_id}/jobs/latest",
+        { params: { path: { preset_id: selectedPresetId } } },
+      );
+      if (cancelled) return;
+      if (response.ok && data) {
+        setActiveJob(data.job ?? null);
+        setJobEvents(data.events ?? []);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedPresetId, loadCandidates]);
+
+  const activeJobId = activeJob?.id ?? null;
+  const activeJobStatus = activeJob?.status ?? null;
+  const isJobActive =
+    activeJobStatus === "queued" || activeJobStatus === "running";
+
+  useEffect(() => {
+    if (!activeJobId || !isJobActive) {
+      return;
+    }
+    if (typeof EventSource === "undefined") {
+      return;
+    }
+
+    // Stream live worker step events over SSE while the job is queued or running.
+    const source = new EventSource(`/api/jobs/${activeJobId}/events`);
+
+    const onStep = (event: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(event.data) as RunEventOut;
+        // Deduplicate by event ID in case the initial SSE replay overlaps with REST state.
+        setJobEvents((prev) =>
+          prev.some((ev) => ev.id === parsed.id) ? prev : [...prev, parsed],
+        );
+      } catch {
+        // Ignore malformed event payloads
+      }
+    };
+
+    const onStatus = (event: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(event.data) as JobOut;
+        setActiveJob(parsed);
+        source.close();
+        if (parsed.status === "succeeded" && selectedPresetId) {
+          void loadCandidates(selectedPresetId);
+        } else if (parsed.status === "paused") {
+          // Refresh settings so the TMDB key-paused banner appears immediately.
+          void refreshSettings();
+        }
+      } catch {
+        source.close();
+      }
+    };
+
+    source.addEventListener("step", onStep as EventListener);
+    source.addEventListener("status", onStatus as EventListener);
+
+    return () => {
+      source.removeEventListener("step", onStep as EventListener);
+      source.removeEventListener("status", onStatus as EventListener);
+      source.close();
+    };
+  }, [
+    activeJobId,
+    isJobActive,
+    selectedPresetId,
+    loadCandidates,
+    refreshSettings,
+  ]);
+
+  async function handleRegenerate() {
+    if (!selectedPresetId) return;
+    setSubmittingRegenerate(true);
+    setRegenerateError(null);
+    try {
+      const { data, error, response } = await apiClient.POST(
+        "/api/presets/{preset_id}/regenerate",
+        { params: { path: { preset_id: selectedPresetId } } },
+      );
+      if (response.ok && data) {
+        setJobEvents([]);
+        setActiveJob(data);
+      } else if (response.status !== 401) {
+        setRegenerateError(
+          extractErrorDetail(error, "Could not start regeneration."),
+        );
+      }
+    } finally {
+      setSubmittingRegenerate(false);
+    }
+  }
 
   async function handleAssignSlot(slotId: string, presetId: string) {
     setSlotStatus({ text: "", kind: "" });
@@ -546,7 +675,79 @@ export function CatalogsPage() {
       </section>
 
       <section className="card">
-        <h2>Candidates{selectedPreset ? `: ${selectedPreset.name}` : ""}</h2>
+        <div className={styles.candidatesHeader}>
+          <h2>Candidates{selectedPreset ? `: ${selectedPreset.name}` : ""}</h2>
+          {selectedPreset && (
+            <button
+              className="btn primary"
+              type="button"
+              disabled={
+                !tmdbConfigured ||
+                tmdbPausedReason !== null ||
+                isJobActive ||
+                submittingRegenerate
+              }
+              onClick={() => void handleRegenerate()}
+            >
+              {isJobActive ? "Regenerating..." : "Regenerate"}
+            </button>
+          )}
+        </div>
+
+        {selectedPreset && tmdbPausedReason && (
+          <div className="notice notice-err" role="alert">
+            TMDB key paused: {tmdbPausedReason}. Replace your TMDB key in
+            Settings to resume.
+          </div>
+        )}
+
+        {selectedPreset &&
+          settingsLoaded &&
+          !tmdbConfigured &&
+          !tmdbPausedReason && (
+            <div className="notice">
+              Add a TMDB API key in Settings to regenerate.
+            </div>
+          )}
+
+        {regenerateError && <div className="status err">{regenerateError}</div>}
+
+        {selectedPreset && activeJob && (
+          <section className={styles.jobBox} aria-label="Regeneration status">
+            <div className={styles.jobHeader}>
+              <span className={styles.jobTitle}>Latest run</span>
+              <span
+                className={
+                  activeJob.status === "succeeded"
+                    ? `${styles.badge} ${styles.badgeOk}`
+                    : activeJob.status === "failed" ||
+                        activeJob.status === "paused"
+                      ? `${styles.badge} ${styles.badgeErr}`
+                      : isJobActive
+                        ? `${styles.badge} ${styles.badgeActive}`
+                        : styles.badge
+                }
+              >
+                {activeJob.status}
+              </span>
+            </div>
+            {(activeJob.paused_reason || activeJob.last_error) && (
+              <p className={styles.jobError}>
+                {activeJob.paused_reason || activeJob.last_error}
+              </p>
+            )}
+            {jobEvents.length > 0 && (
+              <ul className={styles.eventList}>
+                {jobEvents.map((ev) => (
+                  <li key={ev.id} className={styles.eventItem}>
+                    <span className={styles.eventStep}>{ev.step}</span>
+                    <span>{ev.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {lastVeto && (
           <div className={styles.undoBanner} role="status">

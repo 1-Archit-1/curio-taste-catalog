@@ -207,6 +207,26 @@ describe("CatalogsPage", () => {
       if (pathname === "/api/slots" && method === "GET") {
         return jsonResponse({ body: { slots } });
       }
+      if (pathname === "/api/settings" && method === "GET") {
+        return jsonResponse({
+          body: {
+            user_id: "00000000-0000-0000-0000-000000000001",
+            addon_manifest_url: "https://example.com/manifest.json",
+            llm_provider: "gemini",
+            monthly_token_budget: null,
+            supported_llm_providers: ["gemini"],
+            jobs_paused_reason: null,
+            keys: {
+              tmdb: {
+                configured: true,
+                last4: "1234",
+                paused_reason: null,
+                updated_at: null,
+              },
+            },
+          },
+        });
+      }
       if (pathname.startsWith("/api/slots/") && method === "PUT") {
         const slotId = pathname.split("/").pop() ?? "";
         const body = await readBody();
@@ -254,6 +274,13 @@ describe("CatalogsPage", () => {
             candidates: candidatesByPreset[presetId] ?? [],
           },
         });
+      }
+      if (
+        pathname.startsWith("/api/presets/") &&
+        pathname.endsWith("/jobs/latest") &&
+        method === "GET"
+      ) {
+        return jsonResponse({ body: { job: null, run: null, events: [] } });
       }
       if (pathname.startsWith("/api/presets/") && method === "PATCH") {
         const presetId = pathname.split("/").pop() ?? "";
@@ -442,5 +469,173 @@ describe("CatalogsPage", () => {
         within(bladeCard).queryByRole("button", { name: "Undo" }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  function setupBasicCatalogMocks(options: {
+    tmdbConfigured: boolean;
+    tmdbPausedReason?: string | null;
+    onRegenerate?: () => Response;
+  }) {
+    const presetId = "11111111-1111-1111-1111-111111111111";
+    fetchMock.mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input);
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const pathname = new URL(url, "http://localhost").pathname;
+
+      if (pathname === "/api/auth/me" && method === "GET") {
+        return jsonResponse({
+          body: {
+            id: "00000000-0000-0000-0000-000000000001",
+            username: "alice",
+          },
+        });
+      }
+      if (pathname === "/api/slots" && method === "GET") {
+        return jsonResponse({
+          body: {
+            slots: [
+              {
+                slot_id: "curio_movie_1",
+                name: "Curio Movies 1",
+                media_type: "movie",
+                preset_id: presetId,
+                preset_name: "Noir Picks",
+              },
+            ],
+          },
+        });
+      }
+      if (pathname === "/api/presets" && method === "GET") {
+        return jsonResponse({
+          body: {
+            presets: [
+              {
+                id: presetId,
+                name: "Noir Picks",
+                media_type: "movie",
+                min_rating: null,
+                criteria: null,
+                created_at: "2026-11-21T12:00:00Z",
+                updated_at: "2026-11-21T12:00:00Z",
+              },
+            ],
+          },
+        });
+      }
+      if (pathname === "/api/settings" && method === "GET") {
+        return jsonResponse({
+          body: {
+            user_id: "00000000-0000-0000-0000-000000000001",
+            addon_manifest_url: "https://example.com/manifest.json",
+            llm_provider: "gemini",
+            monthly_token_budget: null,
+            supported_llm_providers: ["gemini"],
+            jobs_paused_reason: null,
+            keys: {
+              tmdb: {
+                configured: options.tmdbConfigured,
+                last4: options.tmdbConfigured ? "1234" : null,
+                paused_reason: options.tmdbPausedReason ?? null,
+                updated_at: null,
+              },
+            },
+          },
+        });
+      }
+      if (
+        pathname === `/api/presets/${presetId}/candidates` &&
+        method === "GET"
+      ) {
+        return jsonResponse({
+          body: { preset_id: presetId, candidates: [] },
+        });
+      }
+      if (
+        pathname === `/api/presets/${presetId}/jobs/latest` &&
+        method === "GET"
+      ) {
+        return jsonResponse({ body: { job: null, run: null, events: [] } });
+      }
+      if (
+        pathname === `/api/presets/${presetId}/regenerate` &&
+        method === "POST" &&
+        options.onRegenerate
+      ) {
+        return options.onRegenerate();
+      }
+      return jsonResponse({ status: 404, body: { detail: "Not found" } });
+    });
+  }
+
+  it("disables Regenerate and shows hint when TMDB key is not configured", async () => {
+    setupBasicCatalogMocks({ tmdbConfigured: false });
+    renderCatalogsApp();
+
+    const btn = await screen.findByRole("button", { name: "Regenerate" });
+    expect(btn).toBeDisabled();
+    expect(
+      screen.getByText("Add a TMDB API key in Settings to regenerate."),
+    ).toBeInTheDocument();
+  });
+
+  it("disables Regenerate and shows alert when TMDB key is paused", async () => {
+    setupBasicCatalogMocks({
+      tmdbConfigured: true,
+      tmdbPausedReason: "TMDB rejected key (401)",
+    });
+    renderCatalogsApp();
+
+    const btn = await screen.findByRole("button", { name: "Regenerate" });
+    expect(btn).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "TMDB key paused: TMDB rejected key (401). Replace your TMDB key in Settings to resume.",
+    );
+  });
+
+  it("calls POST /api/presets/{id}/regenerate when TMDB key is configured", async () => {
+    const user = userEvent.setup();
+    let regenerateCalls = 0;
+
+    setupBasicCatalogMocks({
+      tmdbConfigured: true,
+      onRegenerate: () => {
+        regenerateCalls += 1;
+        return jsonResponse({
+          status: 202,
+          body: {
+            id: "44444444-4444-4444-4444-444444444444",
+            preset_id: "11111111-1111-1111-1111-111111111111",
+            job_kind: "preset_regenerate",
+            trigger: "manual",
+            status: "queued",
+            paused_key_type: null,
+            paused_reason: null,
+            last_error: null,
+            created_at: "2026-11-22T12:00:00Z",
+            finished_at: null,
+          },
+        });
+      },
+    });
+    renderCatalogsApp();
+
+    const btn = await screen.findByRole("button", { name: "Regenerate" });
+    expect(btn).toBeEnabled();
+
+    await user.click(btn);
+    await waitFor(() => {
+      expect(regenerateCalls).toBe(1);
+    });
+    expect(
+      await screen.findByRole("button", { name: "Regenerating..." }),
+    ).toBeDisabled();
+    expect(screen.getByText("queued")).toBeInTheDocument();
   });
 });

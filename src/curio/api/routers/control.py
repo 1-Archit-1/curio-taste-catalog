@@ -1,9 +1,13 @@
 """Authenticated control-plane routes (auth, settings, API keys, audit). No CORS."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from curio.api.deps import AppSettings, CurrentUser, DbSession
@@ -29,6 +33,13 @@ from curio.api.schemas.catalogs import (
     VetoOut,
     VetoRequest,
 )
+from curio.api.schemas.jobs import (
+    JobOut,
+    JobStatusResponse,
+    LatestPresetJobResponse,
+    RunEventOut,
+    RunOut,
+)
 from curio.api.schemas.keys import (
     ApiKeyRequest,
     AuditEntryResponse,
@@ -45,9 +56,11 @@ from curio.api.schemas.settings import (
 )
 from curio.clients.providers import LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
+from curio.db.models.jobs import Job, Run, RunEvent
 from curio.db.models.users import User
 from curio.services import auth as auth_service
 from curio.services import catalogs as catalogs_service
+from curio.services import jobs as jobs_service
 from curio.services import keys as keys_service
 from curio.services import users as users_service
 from curio.settings import Settings
@@ -74,6 +87,7 @@ async def _build_settings_response(
             configured=row is not None,
             last4=row.last4 if row else None,
             updated_at=row.updated_at if row else None,
+            paused_reason=row.paused_reason if row else None,
         )
 
     return SettingsResponse(
@@ -473,3 +487,236 @@ async def delete_veto(
         tmdb_id=tmdb_id,
     )
     return MessageResponse(message="Veto removed.")
+
+
+def _job_to_out(job: Job) -> JobOut:
+    return JobOut(
+        id=job.id,
+        preset_id=job.preset_id,
+        job_kind=job.job_kind,
+        status=job.status,
+        trigger=job.trigger,
+        paused_key_type=job.paused_key_type,
+        paused_reason=job.paused_reason,
+        last_error=job.last_error,
+        created_at=job.created_at,
+        finished_at=job.finished_at,
+    )
+
+
+def _run_to_out(run: Run) -> RunOut:
+    return RunOut(
+        id=run.id,
+        pipeline=run.pipeline,
+        trigger=run.trigger,
+        status=run.status,
+        latency_ms=run.latency_ms,
+        error=run.error,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+    )
+
+
+def _event_to_out(event: RunEvent) -> RunEventOut:
+    return RunEventOut(
+        id=event.id,
+        step=event.step,
+        message=event.message,
+        payload=event.payload,
+        created_at=event.created_at,
+    )
+
+
+@router.post("/presets/{preset_id}/regenerate", status_code=status.HTTP_201_CREATED)
+async def regenerate_preset(
+    preset_id: UUID,
+    user: CurrentUser,
+    session: DbSession,
+) -> JobOut:
+    """Enqueue a background `regenerate` job for the preset (409 if one is already active)."""
+    try:
+        job = await jobs_service.enqueue_regenerate_job(
+            session,
+            user_id=user.id,
+            preset_id=preset_id,
+        )
+    except jobs_service.PresetNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except jobs_service.MissingRequiredKeysError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except jobs_service.DuplicateJobError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    return _job_to_out(job)
+
+
+@router.get("/presets/{preset_id}/jobs/latest")
+async def get_latest_preset_job(
+    preset_id: UUID,
+    user: CurrentUser,
+    session: DbSession,
+) -> LatestPresetJobResponse:
+    """Return the most recent job, run, and step events for a preset."""
+    try:
+        job, run, events = await jobs_service.get_latest_preset_job_status(
+            session,
+            user_id=user.id,
+            preset_id=preset_id,
+        )
+    except jobs_service.PresetNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return LatestPresetJobResponse(
+        job=_job_to_out(job) if job is not None else None,
+        run=_run_to_out(run) if run is not None else None,
+        events=[_event_to_out(ev) for ev in events],
+    )
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_status(
+    job_id: UUID,
+    user: CurrentUser,
+    session: DbSession,
+) -> JobStatusResponse:
+    """Return a single job with its run summary and recorded step events."""
+    result = await jobs_service.get_job_status(
+        session,
+        user_id=user.id,
+        job_id=job_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found.",
+        )
+    job, run, events = result
+    return JobStatusResponse(
+        job=_job_to_out(job),
+        run=_run_to_out(run) if run is not None else None,
+        events=[_event_to_out(ev) for ev in events],
+    )
+
+
+_SSE_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "paused"})
+
+
+@router.get(
+    "/jobs/{job_id}/events",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
+async def stream_job_events(
+    job_id: UUID,
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+    settings: AppSettings,
+) -> StreamingResponse:
+    """Stream live job progress over SSE using Postgres LISTEN/NOTIFY.
+
+    Replays any already-committed `run_events` first so steps emitted before the
+    browser connected are never lost, then wakes on `NOTIFY` until the job ends.
+    """
+    # FastAPI runs `get_session`'s commit after sending the 201 response, so an immediate
+    # SSE connection on another API worker may arrive a few milliseconds before commit finishes.
+    job = await jobs_service.get_job(session, user_id=user.id, job_id=job_id)
+    if job is None:
+        session_factory = getattr(request.app.state, "session_factory", None)
+        if session_factory is not None:
+            for _ in range(10):
+                await asyncio.sleep(0.05)
+                async with session_factory() as retry_session:
+                    job = await jobs_service.get_job(retry_session, user_id=user.id, job_id=job_id)
+                if job is not None:
+                    break
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found.",
+        )
+
+    session_factory = request.app.state.session_factory
+    dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+    async def event_stream() -> AsyncIterator[str]:
+        # Dedicated unpooled connection so long-lived LISTEN never exhausts the SQLAlchemy pool.
+        conn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
+        try:
+            await conn.execute(f"LISTEN job_events_{job_id.hex}")
+            last_id = 0
+
+            # Initial replay: catch events committed before LISTEN started.
+            async with session_factory() as read_session:
+                events = await jobs_service.list_run_events_for_job(
+                    read_session,
+                    user_id=user.id,
+                    job_id=job_id,
+                    after_id=last_id,
+                )
+                current_job = await jobs_service.get_job(
+                    read_session,
+                    user_id=user.id,
+                    job_id=job_id,
+                )
+
+            for ev in events:
+                last_id = ev.id
+                yield f"event: step\ndata: {_event_to_out(ev).model_dump_json()}\n\n"
+
+            if current_job is None or current_job.status in _SSE_TERMINAL_STATUSES:
+                if current_job is not None:
+                    yield f"event: status\ndata: {_job_to_out(current_job).model_dump_json()}\n\n"
+                return
+
+            while True:
+                # Block until the worker commits + NOTIFYs, or send a keepalive comment every 15s.
+                received = False
+                async for _notify in conn.notifies(timeout=15.0, stop_after=1):
+                    received = True
+                if not received:
+                    yield ": ping\n\n"
+
+                async with session_factory() as read_session:
+                    events = await jobs_service.list_run_events_for_job(
+                        read_session,
+                        user_id=user.id,
+                        job_id=job_id,
+                        after_id=last_id,
+                    )
+                    current_job = await jobs_service.get_job(
+                        read_session,
+                        user_id=user.id,
+                        job_id=job_id,
+                    )
+
+                for ev in events:
+                    last_id = ev.id
+                    yield f"event: step\ndata: {_event_to_out(ev).model_dump_json()}\n\n"
+
+                if current_job is None or current_job.status in _SSE_TERMINAL_STATUSES:
+                    if current_job is not None:
+                        status_json = _job_to_out(current_job).model_dump_json()
+                        yield f"event: status\ndata: {status_json}\n\n"
+                    return
+        finally:
+            await conn.close()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
