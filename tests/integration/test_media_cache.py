@@ -1,7 +1,7 @@
 import json
 import logging
 import math
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -96,7 +96,7 @@ async def test_hydrate_persists_movie_and_series_metadata(session, tmdb, tmdb_ro
     assert series.keyword_ids[:3] == [1508, 2231, 5857]
     assert series.vote_count == 19166
     assert series.original_language == "en"
-    assert series.runtime is None  # the recorded response has an empty episode_run_time
+    assert series.runtime == 56  # empty episode_run_time falls back to last_episode_to_air
     assert series.release_date == date(2008, 1, 20)
     assert series.collection_id is None
     assert series.year == 2008
@@ -390,3 +390,136 @@ async def test_auth_error_stops_remaining_fetches_but_keeps_earlier_titles(
     assert unauthorized.call_count < len(refs)
     assert unauthorized.call_count <= media_service.HYDRATE_CONCURRENCY
     assert (await session.get(MediaItem, ("movie", 603))).hydrated_at is not None
+
+
+async def test_stale_cache_entries_rehydrate_on_demand_only(session, tmdb, tmdb_routes):
+    now = datetime.now(UTC)
+    stale_time = now - timedelta(days=8)
+    fresh_time = now - timedelta(days=2)
+
+    # 603 is stale and will reappear; 87101 is stale and will NOT reappear; 777443 is fresh.
+    session.add_all(
+        [
+            MediaItem(
+                media_type="movie",
+                tmdb_id=603,
+                imdb_id="tt0133093",
+                name="Old Matrix",
+                hydrated_at=stale_time,
+            ),
+            MediaItem(
+                media_type="movie",
+                tmdb_id=87101,
+                imdb_id="tt1340138",
+                name="Old Terminator",
+                hydrated_at=stale_time,
+            ),
+            MediaItem(
+                media_type="movie",
+                tmdb_id=777443,
+                imdb_id="tt7766378",
+                name="Fresh Electric State",
+                hydrated_at=fresh_time,
+            ),
+        ]
+    )
+    await session.flush()
+
+    items = await media_service.hydrate_titles(
+        session,
+        tmdb,
+        [TmdbRef("movie", 603), TmdbRef("movie", 777443)],
+        settings=SETTINGS,
+    )
+    by_id = {i.tmdb_id: i for i in items}
+    assert by_id[603].name == "The Matrix"
+    assert by_id[603].hydrated_at > stale_time
+    assert by_id[777443].name == "Fresh Electric State"
+
+    assert tmdb_routes["movie_603"].call_count == 1
+    assert tmdb_routes["movie_777443"].call_count == 0
+    assert tmdb_routes["movie_87101"].call_count == 0
+
+    untouched = await session.get(MediaItem, ("movie", 87101))
+    assert untouched.name == "Old Terminator"
+    assert untouched.hydrated_at == stale_time
+
+
+async def test_similar_titles_hydrates_in_order(session, tmdb, tmdb_routes, respx_mock):
+    respx_mock.get(f"{BASE_URL}/movie/603/similar").mock(
+        return_value=httpx.Response(200, json=load("similar_movie_603.json"))
+    )
+    items = await media_service.similar_titles(session, tmdb, "movie", 603, settings=SETTINGS)
+    assert [i.imdb_id for i in items] == ["tt1340138", "tt7766378"]
+
+
+async def test_discover_unexcluded_walks_pages_skips_excluded_and_stops_at_limit(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    page1 = {
+        "page": 1,
+        "results": [
+            {"id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+            {"id": 1836920, "title": "Deadline", "release_date": "2026-11-20"},  # no imdb_id
+            {"id": 1836957, "title": "Mama Bear", "release_date": ""},
+        ],
+    }
+    page2 = {
+        "page": 2,
+        "results": [
+            {"id": 87101, "title": "Terminator Genisys", "release_date": "2015-06-23"},
+            {"id": 777443, "title": "The Electric State", "release_date": "2025-02-24"},
+        ],
+    }
+    discover_route = respx_mock.get(f"{BASE_URL}/discover/movie").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json=page2),
+            httpx.Response(200, json={"page": 3, "results": []}),
+        ]
+    )
+
+    items = await media_service.discover_unexcluded_titles(
+        session,
+        tmdb,
+        "movie",
+        limit=2,
+        excluded_keys={("movie", 603)},
+        settings=SETTINGS,
+    )
+    assert [i.tmdb_id for i in items] == [1836957, 87101]
+    assert discover_route.call_count == 2
+    assert tmdb_routes["movie_603"].call_count == 0  # excluded before hydration
+    assert tmdb_routes["movie_777443"].call_count == 1  # hydrated on page 2, limit sliced to 2
+
+
+async def test_page_walking_stops_at_max_pages_or_empty_page(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    settings = Settings(_env_file=None, database_url="postgresql://unused", tmdb_max_pages=2)
+    page1 = {"page": 1, "results": [{"id": 603, "title": "The Matrix", "release_date": "1999"}]}
+    page2 = {"page": 2, "results": [{"id": 87101, "title": "Terminator", "release_date": "2015"}]}
+    rec_route = respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json=page2),
+            httpx.Response(200, json={"page": 3, "results": []}),
+        ]
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=10, settings=settings
+    )
+    assert [i.tmdb_id for i in items] == [603, 87101]
+    assert rec_route.call_count == 2  # stopped at tmdb_max_pages=2
+
+    sim_route = respx_mock.get(f"{BASE_URL}/movie/603/similar").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json={"page": 2, "results": []}),
+        ]
+    )
+    sim_items = await media_service.similar_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=10, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in sim_items] == [603]
+    assert sim_route.call_count == 2  # stopped on empty page 2 before tmdb_max_pages=5

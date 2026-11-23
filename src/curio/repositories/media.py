@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -17,17 +17,26 @@ log = logging.getLogger(__name__)
 
 
 async def get_hydrated(
-    session: AsyncSession, keys: Sequence[MediaKey]
+    session: AsyncSession,
+    keys: Sequence[MediaKey],
+    *,
+    max_age: timedelta | None = None,
 ) -> dict[MediaKey, MediaItem]:
-    """Cache lookup: rows for `keys` that have already been hydrated from TMDB."""
+    """Cache lookup: rows for `keys` that have already been hydrated from TMDB.
+
+    When `max_age` is set, rows with `hydrated_at < now - max_age` are treated as stale and
+    omitted so callers re-hydrate them on demand.
+    """
     if not keys:
         return {}
-    rows = await session.scalars(
-        select(MediaItem).where(
-            tuple_(MediaItem.media_type, MediaItem.tmdb_id).in_(list(keys)),
-            MediaItem.hydrated_at.is_not(None),
-        )
-    )
+    conditions = [
+        tuple_(MediaItem.media_type, MediaItem.tmdb_id).in_(list(keys)),
+        MediaItem.hydrated_at.is_not(None),
+    ]
+    if max_age is not None:
+        cutoff = datetime.now(UTC) - max_age
+        conditions.append(MediaItem.hydrated_at >= cutoff)
+    rows = await session.scalars(select(MediaItem).where(*conditions))
     return {(r.media_type, r.tmdb_id): r for r in rows}
 
 

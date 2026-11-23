@@ -51,6 +51,39 @@ class TmdbRef:
 
 
 @dataclass(frozen=True)
+class TmdbKeyword:
+    """A keyword entry returned by `/search/keyword`."""
+
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class TmdbPerson:
+    """A person entry returned by `/search/person`."""
+
+    id: int
+    name: str
+    known_for_department: str | None = None
+
+
+@dataclass(frozen=True)
+class TmdbGenre:
+    """A genre entry returned by `/genre/{movie|tv}/list`."""
+
+    id: int
+    name: str
+
+
+_GENRE_CACHE: dict[MediaType, list[TmdbGenre]] = {}
+
+
+def clear_genre_cache() -> None:
+    """Clear the process-level TMDB genre list cache (intended for tests)."""
+    _GENRE_CACHE.clear()
+
+
+@dataclass(frozen=True)
 class TmdbTitle:
     """A fully described title. `imdb_id` is None when TMDB has none."""
 
@@ -92,12 +125,14 @@ def _release_date(value: str | None) -> date | None:
 
 
 def _runtime(media_type: MediaType, data: dict[str, Any]) -> int | None:
-    """Minutes. Series use the first `episode_run_time` entry. TMDB reports 0 for unknown."""
+    """Minutes. Series use `episode_run_time[0]`, falling back to `last_episode_to_air.runtime`."""
     if media_type == "movie":
         minutes = data.get("runtime")
     else:
         episode_run_time = data.get("episode_run_time")
         minutes = episode_run_time[0] if episode_run_time else None
+        if not minutes:
+            minutes = (data.get("last_episode_to_air") or {}).get("runtime")
     return minutes or None
 
 
@@ -201,6 +236,50 @@ class TmdbClient:
             f"/{_TMDB_PATH[media_type]}/{tmdb_id}/recommendations", {"page": page}
         )
         return _refs(media_type, data)
+
+    async def similar(self, media_type: MediaType, tmdb_id: int, *, page: int = 1) -> list[TmdbRef]:
+        """Titles TMDB considers similar to `tmdb_id`."""
+        data = await self._get(f"/{_TMDB_PATH[media_type]}/{tmdb_id}/similar", {"page": page})
+        return _refs(media_type, data)
+
+    async def search_keywords(self, query: str, *, page: int = 1) -> list[TmdbKeyword]:
+        """Search TMDB keywords by name."""
+        data = await self._get("/search/keyword", {"query": query, "page": page})
+        try:
+            return [
+                TmdbKeyword(id=k["id"], name=k["name"]) for k in (data or {}).get("results", [])
+            ]
+        except (KeyError, TypeError, AttributeError):
+            raise TmdbError("TMDB returned an unexpected response shape") from None
+
+    async def search_people(self, query: str, *, page: int = 1) -> list[TmdbPerson]:
+        """Search TMDB people (cast/crew) by name."""
+        data = await self._get("/search/person", {"query": query, "page": page})
+        try:
+            return [
+                TmdbPerson(
+                    id=p["id"],
+                    name=p["name"],
+                    known_for_department=p.get("known_for_department") or None,
+                )
+                for p in (data or {}).get("results", [])
+            ]
+        except (KeyError, TypeError, AttributeError):
+            raise TmdbError("TMDB returned an unexpected response shape") from None
+
+    async def genres(self, media_type: MediaType) -> list[TmdbGenre]:
+        """Return TMDB's official genre list for `media_type`, cached in-process."""
+        cached = _GENRE_CACHE.get(media_type)
+        if cached is not None:
+            return list(cached)
+        data = await self._get(f"/genre/{_TMDB_PATH[media_type]}/list")
+        try:
+            parsed = [TmdbGenre(id=g["id"], name=g["name"]) for g in (data or {}).get("genres", [])]
+        except (KeyError, TypeError, AttributeError):
+            raise TmdbError("TMDB returned an unexpected response shape") from None
+        if data is not None:
+            _GENRE_CACHE[media_type] = parsed
+        return list(parsed)
 
     async def hydrate(self, media_type: MediaType, tmdb_id: int) -> TmdbTitle | None:
         """Details, external IDs, keywords, and credits in one request. None if TMDB 404s."""

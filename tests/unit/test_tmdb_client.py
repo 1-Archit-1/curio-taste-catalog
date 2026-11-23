@@ -12,12 +12,23 @@ from curio.clients.tmdb import (
     TmdbAuthError,
     TmdbClient,
     TmdbError,
+    TmdbGenre,
+    TmdbKeyword,
+    TmdbPerson,
     TmdbRateLimitError,
+    clear_genre_cache,
 )
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "tmdb"
 V3_KEY = "v3secretkey0123456789abcdef0123"
 V4_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0bWRiIn0.v4secretsignature"
+
+
+@pytest.fixture(autouse=True)
+def _reset_genre_cache():
+    clear_genre_cache()
+    yield
+    clear_genre_cache()
 
 
 def fixture(name: str) -> dict:
@@ -142,16 +153,29 @@ async def test_hydrate_series_reads_external_ids_and_creators(respx_mock):
     assert title.original_language == "en"
     assert title.release_date == date(2008, 1, 20)
     assert (title.collection_id, title.collection_name) == (None, None)
-    # The recorded response has an empty `episode_run_time`.
-    assert title.runtime is None
+    # The recorded response has an empty `episode_run_time`, falling back to `last_episode_to_air`.
+    assert title.runtime == 56
 
 
 @pytest.mark.parametrize(
-    ("episode_run_time", "expected"), [([47, 60], 47), ([], None), ([0], None), (None, None)]
+    ("episode_run_time", "last_ep_runtime", "expected"),
+    [
+        ([47, 60], 56, 47),
+        ([], 56, 56),
+        ([0], 56, 56),
+        (None, 56, 56),
+        ([], 0, None),
+        ([], None, None),
+    ],
 )
-async def test_series_runtime_is_first_episode_run_time(respx_mock, episode_run_time, expected):
+async def test_series_runtime_uses_episode_run_time_or_last_episode_fallback(
+    respx_mock, episode_run_time, last_ep_runtime, expected
+):
     data = fixture("tv_1396.json")
     data["episode_run_time"] = episode_run_time
+    data["last_episode_to_air"] = (
+        {"runtime": last_ep_runtime} if last_ep_runtime is not None else None
+    )
     respx_mock.get(f"{BASE_URL}/tv/1396").mock(return_value=httpx.Response(200, json=data))
     async with make_client() as client:
         title = await client.hydrate("series", 1396)
@@ -382,3 +406,103 @@ async def test_real_http_logs_contain_no_key(monkeypatch, caplog):
     assert V3_KEY not in text
     assert V4_TOKEN not in text
     assert "v4secretsignature" not in text
+
+
+async def test_search_keywords(respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/search/keyword").mock(
+        return_value=httpx.Response(200, json=fixture("search_keyword.json"))
+    )
+    async with make_client() as client:
+        keywords = await client.search_keywords("dystopia", page=2)
+    assert keywords == [
+        TmdbKeyword(id=310, name="artificial intelligence (a.i.)"),
+        TmdbKeyword(id=4565, name="dystopia"),
+        TmdbKeyword(id=1566, name="dream"),
+    ]
+    params = route.calls.last.request.url.params
+    assert params["query"] == "dystopia"
+    assert params["page"] == "2"
+
+
+async def test_search_people(respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/search/person").mock(
+        return_value=httpx.Response(200, json=fixture("search_person.json"))
+    )
+    async with make_client() as client:
+        people = await client.search_people("Keanu", page=3)
+    assert people == [
+        TmdbPerson(id=6384, name="Keanu Reeves", known_for_department="Acting"),
+        TmdbPerson(id=9339, name="Lana Wachowski", known_for_department="Directing"),
+    ]
+    params = route.calls.last.request.url.params
+    assert params["query"] == "Keanu"
+    assert params["page"] == "3"
+
+
+async def test_genres_cached_per_media_type(respx_mock):
+    movie_route = respx_mock.get(f"{BASE_URL}/genre/movie/list").mock(
+        return_value=httpx.Response(200, json=fixture("genres_movie.json"))
+    )
+    tv_route = respx_mock.get(f"{BASE_URL}/genre/tv/list").mock(
+        return_value=httpx.Response(200, json=fixture("genres_tv.json"))
+    )
+    async with make_client() as client:
+        movie_first = await client.genres("movie")
+        movie_second = await client.genres("movie")
+        tv_first = await client.genres("series")
+        tv_second = await client.genres("series")
+    assert movie_route.call_count == 1
+    assert tv_route.call_count == 1
+    assert (
+        movie_first
+        == movie_second
+        == [
+            TmdbGenre(id=28, name="Action"),
+            TmdbGenre(id=12, name="Adventure"),
+            TmdbGenre(id=878, name="Science Fiction"),
+        ]
+    )
+    assert (
+        tv_first
+        == tv_second
+        == [
+            TmdbGenre(id=18, name="Drama"),
+            TmdbGenre(id=80, name="Crime"),
+            TmdbGenre(id=10765, name="Sci-Fi & Fantasy"),
+        ]
+    )
+
+    clear_genre_cache()
+    async with make_client() as client:
+        await client.genres("movie")
+    assert movie_route.call_count == 2
+
+
+async def test_similar_titles(respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/movie/603/similar").mock(
+        return_value=httpx.Response(200, json=fixture("similar_movie_603.json"))
+    )
+    async with make_client() as client:
+        refs = await client.similar("movie", 603, page=2)
+    assert [(r.media_type, r.tmdb_id, r.name, r.year) for r in refs] == [
+        ("movie", 87101, "Terminator Genisys", 2015),
+        ("movie", 777443, "The Electric State", 2025),
+    ]
+    assert route.calls.last.request.url.params["page"] == "2"
+
+
+@pytest.mark.parametrize(
+    ("path", "call"),
+    [
+        ("/search/keyword", lambda c: c.search_keywords("ai")),
+        ("/search/person", lambda c: c.search_people("keanu")),
+        ("/genre/movie/list", lambda c: c.genres("movie")),
+    ],
+)
+async def test_lookup_malformed_responses_raise_tmdb_error(respx_mock, path, call):
+    respx_mock.get(f"{BASE_URL}{path}").mock(
+        return_value=httpx.Response(200, json={"results": [{"bad": "shape"}], "genres": [123]})
+    )
+    async with make_client() as client:
+        with pytest.raises(TmdbError):
+            await call(client)

@@ -7,7 +7,9 @@ are stored (so they are never refetched, and history can still reference them; A
 """
 
 import asyncio
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Set as AbstractSet
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -101,7 +103,8 @@ async def hydrate_titles(
     `embed_missing` so row locks aren't held across Gemini network calls.
     """
     keys = _dedupe(refs)
-    cached = await media_repo.get_hydrated(session, keys)
+    max_age = timedelta(days=settings.tmdb_cache_max_age_days)
+    cached = await media_repo.get_hydrated(session, keys, max_age=max_age)
     missing = [k for k in keys if k not in cached]
     gate = asyncio.Semaphore(HYDRATE_CONCURRENCY)
     auth_failed = asyncio.Event()
@@ -180,6 +183,123 @@ async def recommend_titles(
 ) -> list[MediaItem]:
     refs = await client.recommendations(media_type, tmdb_id, page=page)
     return [i for i in await hydrate_titles(session, client, refs, settings=settings) if i.imdb_id]
+
+
+async def similar_titles(
+    session: AsyncSession,
+    client: TmdbClient,
+    media_type: MediaType,
+    tmdb_id: int,
+    *,
+    settings: Settings,
+    page: int = 1,
+) -> list[MediaItem]:
+    refs = await client.similar(media_type, tmdb_id, page=page)
+    return [i for i in await hydrate_titles(session, client, refs, settings=settings) if i.imdb_id]
+
+
+async def collect_unexcluded_titles(
+    session: AsyncSession,
+    client: TmdbClient,
+    fetch_page: Callable[[int], Awaitable[list[TmdbRef]]],
+    *,
+    limit: int,
+    excluded_keys: AbstractSet[MediaKey] = frozenset(),
+    settings: Settings,
+) -> list[MediaItem]:
+    """Walk paginated TMDB refs from page 1 until `limit` unexcluded servable items are collected.
+
+    Stops early on an empty page or at `settings.tmdb_max_pages`. Excluded and duplicate refs are
+    skipped before hydration so we don't spend TMDB detail calls on titles the user already saw
+    or vetoed.
+    """
+    if limit <= 0:
+        return []
+    collected: list[MediaItem] = []
+    seen_keys: set[MediaKey] = set()
+    for page in range(1, settings.tmdb_max_pages + 1):
+        refs = await fetch_page(page)
+        if not refs:
+            break
+        candidate_refs: list[TmdbRef] = []
+        for ref in refs:
+            key = (ref.media_type, ref.tmdb_id)
+            if key in excluded_keys or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            candidate_refs.append(ref)
+        if not candidate_refs:
+            continue
+        hydrated = await hydrate_titles(session, client, candidate_refs, settings=settings)
+        for item in hydrated:
+            if item.imdb_id:
+                collected.append(item)
+                if len(collected) >= limit:
+                    return collected
+    return collected
+
+
+async def discover_unexcluded_titles(
+    session: AsyncSession,
+    client: TmdbClient,
+    media_type: MediaType,
+    *,
+    limit: int,
+    excluded_keys: AbstractSet[MediaKey] = frozenset(),
+    settings: Settings,
+    **filters: object,
+) -> list[MediaItem]:
+    """Walk TMDB discover pages until `limit` unexcluded servable titles are collected."""
+    return await collect_unexcluded_titles(
+        session,
+        client,
+        lambda page: client.discover(media_type, page=page, **filters),
+        limit=limit,
+        excluded_keys=excluded_keys,
+        settings=settings,
+    )
+
+
+async def recommend_unexcluded_titles(
+    session: AsyncSession,
+    client: TmdbClient,
+    media_type: MediaType,
+    tmdb_id: int,
+    *,
+    limit: int,
+    excluded_keys: AbstractSet[MediaKey] = frozenset(),
+    settings: Settings,
+) -> list[MediaItem]:
+    """Walk TMDB recommendation pages until `limit` unexcluded servable titles are collected."""
+    return await collect_unexcluded_titles(
+        session,
+        client,
+        lambda page: client.recommendations(media_type, tmdb_id, page=page),
+        limit=limit,
+        excluded_keys=excluded_keys,
+        settings=settings,
+    )
+
+
+async def similar_unexcluded_titles(
+    session: AsyncSession,
+    client: TmdbClient,
+    media_type: MediaType,
+    tmdb_id: int,
+    *,
+    limit: int,
+    excluded_keys: AbstractSet[MediaKey] = frozenset(),
+    settings: Settings,
+) -> list[MediaItem]:
+    """Walk TMDB similar-title pages until `limit` unexcluded servable titles are collected."""
+    return await collect_unexcluded_titles(
+        session,
+        client,
+        lambda page: client.similar(media_type, tmdb_id, page=page),
+        limit=limit,
+        excluded_keys=excluded_keys,
+        settings=settings,
+    )
 
 
 def embedding_text(item: MediaItem) -> str:
