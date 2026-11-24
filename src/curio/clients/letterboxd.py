@@ -2,6 +2,9 @@
 
 Rules (docs/architecture.md & ADR 0004): httpx and stdlib only; never touch the database,
 never scrape HTML, and never use unofficial APIs.
+
+Ratings leave this module on Curio's 0-10 scale (Letterboxd stars x 2), the scale every table
+uses (ADR 0009).
 """
 
 from __future__ import annotations
@@ -10,17 +13,23 @@ import csv
 import io
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_ZIP_BYTES = 50 * 1024 * 1024
+MAX_ZIP_MEMBERS = 1000
 MAX_ZIP_ENTRY_BYTES = 20 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 200 * 1024 * 1024
+MAX_RSS_BYTES = 5 * 1024 * 1024
+MAX_RSS_REDIRECTS = 3
+_LETTERBOXD_HOSTS = frozenset({"letterboxd.com", "www.letterboxd.com"})
 
 _USERNAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 _RESERVED_SEGMENTS = frozenset(
@@ -72,7 +81,7 @@ class LetterboxdRssEntry:
     tmdb_id: int | None
     title: str
     year: int | None
-    rating: float | None
+    rating: float | None  # Curio 0-10 scale
     watched_at: datetime | None
     entry_url: str | None
     guid: str | None
@@ -96,7 +105,7 @@ class LetterboxdExportRow:
     title: str
     year: int | None
     letterboxd_url: str | None
-    rating: float | None
+    rating: float | None  # Curio 0-10 scale
     watched_at: datetime | None
     list_slug: str | None = None
     list_name: str | None = None
@@ -135,7 +144,7 @@ def normalize_letterboxd_username(value: str) -> str:
         to_parse = raw if "://" in raw else f"https://{raw}"
         parsed = urlparse(to_parse)
         host = (parsed.hostname or "").lower()
-        if host not in {"letterboxd.com", "www.letterboxd.com"}:
+        if host not in _LETTERBOXD_HOSTS:
             raise LetterboxdError("URL must be a letterboxd.com profile or RSS link.")
         segments = [seg for seg in parsed.path.split("/") if seg]
         if not segments:
@@ -168,7 +177,8 @@ def _parse_int(value: str | None) -> int | None:
         return None
 
 
-def _parse_float(value: str | None) -> float | None:
+def _parse_stars(value: str | None) -> float | None:
+    """Parse a 0.5-5 star rating into Curio's 0-10 scale."""
     if not value:
         return None
     cleaned = value.strip()
@@ -180,7 +190,7 @@ def _parse_float(value: str | None) -> float | None:
         return None
     if parsed < 0 or parsed > 5:
         return None
-    return parsed
+    return round(parsed * 2.0, 2)
 
 
 def _parse_date(value: str | None) -> datetime | None:
@@ -206,6 +216,8 @@ def _text(elem: ET.Element, path: str) -> str | None:
 
 def parse_rss(xml_text: str, *, username: str, feed_url: str) -> LetterboxdRssFeed:
     """Parse a Letterboxd public diary RSS XML document."""
+    # xml.etree is safe here: CPython's bundled expat doesn't resolve external entities and
+    # stops billion-laughs expansion. The feed is also capped at MAX_RSS_BYTES before parsing.
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
@@ -242,7 +254,7 @@ def parse_rss(xml_text: str, *, username: str, feed_url: str) -> LetterboxdRssFe
                 tmdb_id=tmdb_id,
                 title=film_title,
                 year=_parse_int(_text(item, "letterboxd:filmYear")),
-                rating=_parse_float(_text(item, "letterboxd:memberRating")),
+                rating=_parse_stars(_text(item, "letterboxd:memberRating")),
                 watched_at=_parse_date(_text(item, "letterboxd:watchedDate")),
                 entry_url=(item.findtext("link") or "").strip() or None,
                 guid=(item.findtext("guid") or "").strip() or None,
@@ -270,7 +282,7 @@ def _parse_standard_csv(text: str, item_kind: ExportItemKind) -> list[Letterboxd
             continue
         year = _parse_int(row.get("Year"))
         url = (row.get("Letterboxd URI") or row.get("URL") or "").strip() or None
-        rating = _parse_float(row.get("Rating"))
+        rating = _parse_stars(row.get("Rating"))
         watched_raw = row.get("Watched Date") or row.get("Date")
         watched_at = None if item_kind == "watchlist" else _parse_date(watched_raw)
         rows.append(
@@ -351,24 +363,39 @@ def _strip_root_prefix(names: list[str]) -> dict[str, str]:
 
 
 def parse_export_zip(data: bytes) -> LetterboxdExportArchive:
-    """Parse a Letterboxd account export ZIP into profile rows and lists."""
+    """Parse a Letterboxd account export ZIP into profile rows and lists.
+
+    Bounds the work an upload can cause: at most `MAX_ZIP_MEMBERS` members, `MAX_ZIP_ENTRY_BYTES`
+    uncompressed per entry and `MAX_ZIP_TOTAL_BYTES` in total. The limits apply to the bytes
+    actually read, not to the sizes an entry's header claims.
+    """
     if len(data) > MAX_ZIP_BYTES:
         raise LetterboxdError("Export ZIP exceeds the 50 MB size limit.")
-
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise LetterboxdError("Uploaded file is not a valid ZIP archive.") from exc
-
     with zf:
-        rel_map = _strip_root_prefix(zf.namelist())
+        members = zf.namelist()
+        if len(members) > MAX_ZIP_MEMBERS:
+            raise LetterboxdError(f"Export ZIP has more than {MAX_ZIP_MEMBERS} files.")
+        rel_map = _strip_root_prefix(members)
         username: str | None = None
+        total_read = 0
 
         def read_member(member_name: str) -> str:
-            info = zf.getinfo(member_name)
-            if info.file_size > MAX_ZIP_ENTRY_BYTES:
+            nonlocal total_read
+            try:
+                with zf.open(member_name) as entry:
+                    raw = entry.read(MAX_ZIP_ENTRY_BYTES + 1)
+            except (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError) as exc:
+                raise LetterboxdError(f"Archive entry {member_name} could not be read.") from exc
+            if len(raw) > MAX_ZIP_ENTRY_BYTES:
                 raise LetterboxdError(f"Archive entry {member_name} exceeds size limit.")
-            return _decode_csv_text(zf.read(member_name))
+            total_read += len(raw)
+            if total_read > MAX_ZIP_TOTAL_BYTES:
+                raise LetterboxdError("Export ZIP is too large once uncompressed.")
+            return _decode_csv_text(raw)
 
         if "profile.csv" in rel_map:
             reader = csv.DictReader(io.StringIO(read_member(rel_map["profile.csv"])))
@@ -377,7 +404,6 @@ def parse_export_zip(data: bytes) -> LetterboxdExportArchive:
                 if raw_user and _USERNAME_RE.match(raw_user):
                     username = raw_user
                 break
-
         profile_rows: list[LetterboxdExportRow] = []
         for filename, kind in (
             ("watched.csv", "watched"),
@@ -387,7 +413,6 @@ def parse_export_zip(data: bytes) -> LetterboxdExportArchive:
         ):
             if filename in rel_map:
                 profile_rows.extend(_parse_standard_csv(read_member(rel_map[filename]), kind))
-
         lists: list[LetterboxdExportList] = []
         for rel, member in sorted(rel_map.items()):
             if rel.startswith("lists/") and rel.lower().endswith(".csv"):
@@ -395,13 +420,11 @@ def parse_export_zip(data: bytes) -> LetterboxdExportArchive:
                 parsed_list = _parse_list_csv(read_member(member), slug)
                 if parsed_list.rows:
                     lists.append(parsed_list)
-
         if not profile_rows and not lists:
             raise LetterboxdError(
                 "No recognized Letterboxd CSV files (watched, ratings, diary, watchlist, or lists) "
                 "were found in the ZIP archive."
             )
-
         return LetterboxdExportArchive(
             username=username,
             profile_rows=profile_rows,
@@ -418,9 +441,10 @@ class LetterboxdClient:
         http: httpx.AsyncClient | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
+        # Redirects are followed by `_get_feed`, which keeps them on letterboxd.com.
         self._http = http or httpx.AsyncClient(
             timeout=timeout,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={
                 "User-Agent": "CurioTasteCatalog/0.1 (+https://github.com/1-Archit-1/curio-taste-catalog)"
             },
@@ -437,20 +461,43 @@ class LetterboxdClient:
     async def __aexit__(self, *exc: object) -> None:
         await self.aclose()
 
+    async def _get_feed(self, url: str, username: str) -> str:
+        """GET `url` with a response size cap, following redirects only within letterboxd.com."""
+        for _ in range(MAX_RSS_REDIRECTS + 1):
+            async with self._http.stream("GET", url, follow_redirects=False) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        raise LetterboxdError("Letterboxd sent an invalid redirect.")
+                    url = urljoin(url, location)
+                    parsed = urlparse(url)
+                    if parsed.scheme != "https" or (parsed.hostname or "") not in _LETTERBOXD_HOSTS:
+                        raise LetterboxdError("Letterboxd redirected to an unexpected address.")
+                    continue
+                if resp.status_code == 404:
+                    raise LetterboxdNotFoundError(f"Letterboxd user '{username}' was not found.")
+                if resp.status_code >= 400:
+                    raise LetterboxdError(f"Letterboxd returned HTTP {resp.status_code}.")
+                declared = resp.headers.get("content-length", "")
+                if declared.isdecimal() and int(declared) > MAX_RSS_BYTES:
+                    raise LetterboxdError("Letterboxd RSS feed is too large.")
+                body = bytearray()
+                # Decoded bytes are counted, so a compressed response can't exceed the cap.
+                async for chunk in resp.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_RSS_BYTES:
+                        raise LetterboxdError("Letterboxd RSS feed is too large.")
+                return bytes(body).decode(resp.encoding or "utf-8", errors="replace")
+        raise LetterboxdError("Letterboxd redirected too many times.")
+
     async def fetch_rss(self, username_or_url: str) -> LetterboxdRssFeed:
         """Fetch and parse a user's public Letterboxd diary RSS feed."""
         username = normalize_letterboxd_username(username_or_url)
         url = rss_url_for_username(username)
         try:
-            resp = await self._http.get(url)
+            text = await self._get_feed(url, username)
         except httpx.TimeoutException as exc:
             raise LetterboxdError("Timed out contacting Letterboxd.") from exc
         except httpx.HTTPError as exc:
             raise LetterboxdError("Network error contacting Letterboxd.") from exc
-
-        if resp.status_code == 404:
-            raise LetterboxdNotFoundError(f"Letterboxd user '{username}' was not found.")
-        if resp.status_code >= 400:
-            raise LetterboxdError(f"Letterboxd returned HTTP {resp.status_code}.")
-
-        return parse_rss(resp.text, username=username, feed_url=url)
+        return parse_rss(text, username=username, feed_url=url)
