@@ -98,7 +98,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resolve Import Issue */
+        /**
+         * Resolve Import Issue
+         * @description Match an import issue to a TMDB title. Stores a stub from the data at hand; no TMDB call.
+         */
         post: operations["resolve_import_issue_api_import_issues__issue_id__resolve_post"];
         delete?: never;
         options?: never;
@@ -381,7 +384,10 @@ export interface paths {
         /** List Sources */
         get: operations["list_sources_api_sources_get"];
         put?: never;
-        /** Create Source */
+        /**
+         * Create Source
+         * @description Subscribe to a public Letterboxd diary RSS feed. Needs no TMDB key.
+         */
         post: operations["create_source_api_sources_post"];
         delete?: never;
         options?: never;
@@ -398,7 +404,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import Zip Source */
+        /**
+         * Import Zip Source
+         * @description Queue a background `lb_import` job for an uploaded Letterboxd export ZIP.
+         *
+         *     Matching titles needs the user's TMDB key, which only workers can decrypt. Returns 202 with
+         *     the job once it is committed; follow it at `/api/jobs/{id}`. 413 if the file is over 50 MB,
+         *     422 if no TMDB key is configured, 409 if the key is paused or an import is already running.
+         */
         post: operations["import_zip_source_api_sources_import_zip_post"];
         delete?: never;
         options?: never;
@@ -450,7 +463,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Refresh Source */
+        /**
+         * Refresh Source
+         * @description Fetch a public RSS source now. Needs no TMDB key.
+         */
         post: operations["refresh_source_api_sources__source_id__refresh_post"];
         delete?: never;
         options?: never;
@@ -1062,17 +1078,6 @@ export interface components {
              * @enum {string}
              */
             kind: "seen" | "not_for_me";
-        };
-        /** ZipImportResponse */
-        ZipImportResponse: {
-            /** Issue Count */
-            issue_count: number;
-            /** Matched Count */
-            matched_count: number;
-            /** Skipped Count */
-            skipped_count: number;
-            /** Sources */
-            sources: components["schemas"]["SourceOut"][];
         };
     };
     responses: never;
@@ -1854,12 +1859,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ZipImportResponse"];
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
             /** @description Validation Error */

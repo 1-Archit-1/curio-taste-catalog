@@ -7,7 +7,8 @@ type SourceOut = components["schemas"]["SourceOut"];
 type SourceRole = SourceOut["role"];
 type SourcePreviewResponse = components["schemas"]["SourcePreviewResponse"];
 type ImportIssueOut = components["schemas"]["ImportIssueOut"];
-type ZipImportResponse = components["schemas"]["ZipImportResponse"];
+type JobOut = components["schemas"]["JobOut"];
+type MediaType = ImportIssueOut["candidate_matches"][number]["media_type"];
 
 const ROLE_OPTIONS: Array<{ value: SourceRole; label: string }> = [
   { value: "self", label: "Self (my history)" },
@@ -21,9 +22,29 @@ const KIND_LABELS: Record<SourceOut["kind"], string> = {
   lb_list_csv: "List CSV",
 };
 
+/** How often the page asks for an import job's status. */
+const JOB_POLL_INTERVAL_MS = 2000;
+const TERMINAL_JOB_STATUSES = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "paused",
+]);
+
+interface ImportProgress {
+  jobId: string;
+  /** Latest step message, or a placeholder until the worker reports one. */
+  message: string;
+}
+
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "Never";
   return new Date(iso).toLocaleString();
+}
+
+/** Ratings are stored on a 0-10 scale; Letterboxd shows stars out of 5. */
+function formatStars(rating: number): string {
+  return `★ ${rating / 2}`;
 }
 
 function looksLikeLetterboxdUrl(value: string): boolean {
@@ -49,13 +70,20 @@ export function SourcesPage() {
 
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [zipRole, setZipRole] = useState<SourceRole>("self");
-  const [importingZip, setImportingZip] = useState(false);
+  const [uploadingZip, setUploadingZip] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(
+    null,
+  );
 
   const [busySourceId, setBusySourceId] = useState<string | null>(null);
   const [busyIssueId, setBusyIssueId] = useState<string | null>(null);
   const [manualTmdbIds, setManualTmdbIds] = useState<Record<string, string>>(
     {},
   );
+  const [manualMediaTypes, setManualMediaTypes] = useState<
+    Record<string, MediaType>
+  >({});
+  const importJobId = importProgress?.jobId ?? null;
 
   const loadAll = useCallback(async () => {
     const [sourcesRes, issuesRes] = await Promise.all([
@@ -87,6 +115,66 @@ export function SourcesPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  // Follow the import job until it ends. The worker does the matching, so this can take minutes.
+  useEffect(() => {
+    if (!importJobId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      const { data, error } = await apiClient.GET("/api/jobs/{job_id}", {
+        params: { path: { job_id: importJobId as string } },
+      });
+      if (cancelled) return;
+      if (error || !data) {
+        setImportProgress(null);
+        setNotice({
+          kind: "err",
+          text: extractErrorDetail(error, "Could not check the import."),
+        });
+        return;
+      }
+      const { job } = data;
+      const events = data.events ?? [];
+      if (!TERMINAL_JOB_STATUSES.has(job.status)) {
+        const latest = events[events.length - 1];
+        setImportProgress({
+          jobId: job.id,
+          message: latest?.message ?? "Waiting for a worker...",
+        });
+        timer = setTimeout(() => void poll(), JOB_POLL_INTERVAL_MS);
+        return;
+      }
+      setImportProgress(null);
+      if (job.status === "succeeded") {
+        const counts = events.find((e) => e.step === "import")?.payload as
+          | { matched_count?: number; issue_count?: number }
+          | null
+          | undefined;
+        setNotice({
+          kind: "ok",
+          text: `Imported ${counts?.matched_count ?? 0} items (${counts?.issue_count ?? 0} issues to review).`,
+        });
+      } else {
+        const reason = job.paused_reason ?? job.last_error;
+        const outcome = job.status === "paused" ? "paused" : "failed";
+        setNotice({
+          kind: "err",
+          text: reason
+            ? `Import ${outcome}: ${reason}`
+            : `Import ${job.status}.`,
+        });
+      }
+      await loadAll();
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [importJobId, loadAll]);
 
   async function runPreview(inputText: string) {
     const cleaned = inputText.trim();
@@ -202,21 +290,18 @@ export function SourcesPage() {
   async function handleZipImport(e: FormEvent) {
     e.preventDefault();
     if (!zipFile) return;
-    setImportingZip(true);
+    setUploadingZip(true);
     setNotice(null);
-
     const formData = new FormData();
     formData.append("file", zipFile);
     formData.append("role", zipRole);
-
     const response = await fetch("/api/sources/import-zip", {
       method: "POST",
       body: formData,
       credentials: "same-origin",
     });
-    setImportingZip(false);
-
     if (!response.ok) {
+      setUploadingZip(false);
       let detail = "Failed to import Letterboxd ZIP.";
       try {
         const errBody = (await response.json()) as unknown;
@@ -227,17 +312,17 @@ export function SourcesPage() {
       setNotice({ kind: "err", text: detail });
       return;
     }
-
-    const result = (await response.json()) as ZipImportResponse;
+    const job = (await response.json()) as JobOut;
+    setUploadingZip(false);
     setZipFile(null);
-    setNotice({
-      kind: "ok",
-      text: `Imported ${result.matched_count} items (${result.issue_count} issues to review).`,
-    });
-    await loadAll();
+    setImportProgress({ jobId: job.id, message: "Waiting for a worker..." });
   }
 
-  async function handleResolveIssue(issueId: string, tmdbId: number) {
+  async function handleResolveIssue(
+    issueId: string,
+    tmdbId: number,
+    mediaType: MediaType,
+  ) {
     if (!Number.isInteger(tmdbId) || tmdbId < 1) {
       setNotice({ kind: "err", text: "Enter a valid positive TMDB ID." });
       return;
@@ -248,7 +333,7 @@ export function SourcesPage() {
       "/api/import-issues/{issue_id}/resolve",
       {
         params: { path: { issue_id: issueId } },
-        body: { media_type: "movie", tmdb_id: tmdbId },
+        body: { media_type: mediaType, tmdb_id: tmdbId },
       },
     );
     setBusyIssueId(null);
@@ -341,7 +426,7 @@ export function SourcesPage() {
                     {item.title}
                     {item.year ? ` (${item.year})` : ""}
                     {item.rating !== null && item.rating !== undefined
-                      ? ` — ★ ${item.rating}`
+                      ? ` — ${formatStars(item.rating)}`
                       : ""}
                   </li>
                 ))}
@@ -378,7 +463,9 @@ export function SourcesPage() {
         <h2>Import Letterboxd Export ZIP</h2>
         <p className="subtitle">
           Upload the ZIP downloaded from your Letterboxd account settings
-          (watched, ratings, diary, watchlist, and lists).
+          (watched, ratings, diary, watchlist, and lists). It is matched in the
+          background and needs your TMDB key. Importing again replaces what the
+          earlier export added.
         </p>
         <form className="row" onSubmit={(e) => void handleZipImport(e)}>
           <input
@@ -401,11 +488,16 @@ export function SourcesPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={!zipFile || importingZip}
+            disabled={!zipFile || uploadingZip || importJobId !== null}
           >
-            {importingZip ? "Importing..." : "Import ZIP"}
+            {uploadingZip ? "Uploading..." : "Import ZIP"}
           </button>
         </form>
+        {importProgress && (
+          <p className="subtitle" role="status">
+            Importing: {importProgress.message}
+          </p>
+        )}
       </section>
 
       <section className="card">
@@ -524,7 +616,11 @@ export function SourcesPage() {
                         className="btn"
                         disabled={busyIssueId === issue.id}
                         onClick={() =>
-                          void handleResolveIssue(issue.id, cand.tmdb_id)
+                          void handleResolveIssue(
+                            issue.id,
+                            cand.tmdb_id,
+                            cand.media_type,
+                          )
                         }
                       >
                         Pick: {cand.name}
@@ -549,6 +645,19 @@ export function SourcesPage() {
                       }))
                     }
                   />
+                  <select
+                    aria-label={`Type for ${issue.raw_title}`}
+                    value={manualMediaTypes[issue.id] ?? "movie"}
+                    onChange={(e) =>
+                      setManualMediaTypes((prev) => ({
+                        ...prev,
+                        [issue.id]: e.target.value as MediaType,
+                      }))
+                    }
+                  >
+                    <option value="movie">Movie</option>
+                    <option value="series">Series</option>
+                  </select>
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -560,6 +669,7 @@ export function SourcesPage() {
                       void handleResolveIssue(
                         issue.id,
                         Number(manualTmdbIds[issue.id]),
+                        manualMediaTypes[issue.id] ?? "movie",
                       )
                     }
                   >
