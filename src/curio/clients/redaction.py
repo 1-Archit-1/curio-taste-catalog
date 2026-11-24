@@ -42,11 +42,19 @@ _OAUTH_CALLBACK_PARAM = re.compile(r"(?i)([?&])(code|state)=[^&\s\"']+")
 
 
 class AccessLogRedactingFilter(logging.Filter):
-    """Scrub OAuth callback parameters from uvicorn's access log lines."""
+    """Scrub OAuth callback parameters from uvicorn's access log lines.
+
+    uvicorn logs `(client, method, path, http_version, status)` as the record's args and its
+    formatter unpacks them, so the path is replaced inside the args, not by rewriting the message.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = _OAUTH_CALLBACK_PARAM.sub(r"\1\2=[REDACTED]", record.getMessage())
-        record.args = None
+        args = record.args
+        if isinstance(args, tuple):
+            record.args = tuple(
+                _OAUTH_CALLBACK_PARAM.sub(r"\1\2=[REDACTED]", a) if isinstance(a, str) else a
+                for a in args
+            )
         return True
 
 

@@ -8,6 +8,14 @@ writes the same file names, so re-recording is a drop-in replacement. Run it, re
 `git diff tests/fixtures/simkl`, and fix any test the real shapes break. That is the point of
 re-recording.
 
+The sync tests assert specific titles, statuses and ratings (for example Breaking Bad, TMDB 1396,
+rated 10), so a recording of a real library changes what they expect. Update those expectations
+by hand, or keep the doc-derived files and record into another directory with `--out`.
+
+```sh
+SIMKL_CLIENT_ID=... SIMKL_CLIENT_SECRET=... uv run python scripts/record_simkl_fixtures.py
+```
+
 | File | Endpoint |
 | --- | --- |
 | `activities.json` | `GET /sync/activities` |
