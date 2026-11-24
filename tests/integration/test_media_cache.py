@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from curio.clients.embeddings import BASE_URL as GEMINI_URL
 from curio.clients.embeddings import EMBEDDING_DIMENSIONS, EmbeddingError, GeminiEmbedder
@@ -532,3 +532,120 @@ async def test_page_walking_stops_at_max_pages_or_empty_page(
     )
     assert [i.tmdb_id for i in sim_items] == [603]
     assert sim_route.call_count == 2  # stopped on empty page 2 before tmdb_max_pages=5
+
+
+def _age(days: float, seconds: float = 0):
+    """SQL expression for `now() - days`: the database clock, as the cache uses."""
+    return func.now() - timedelta(days=days, seconds=seconds)
+
+
+async def _seed_cached(session, tmdb_id: int, name: str, *, age_days: float, seconds: float = 0):
+    session.add(
+        MediaItem(
+            media_type="movie",
+            tmdb_id=tmdb_id,
+            imdb_id=f"tt{tmdb_id:07d}",
+            name=name,
+            hydrated_at=_age(age_days, seconds),
+        )
+    )
+    await session.flush()
+
+
+async def _db_now(session) -> datetime:
+    return (await session.execute(select(func.now()))).scalar_one()
+
+
+def _warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+@pytest.mark.parametrize(
+    "route_kwargs",
+    [
+        {"return_value": httpx.Response(500)},
+        {"return_value": httpx.Response(429, headers={"Retry-After": "0"})},
+        {"side_effect": httpx.ReadTimeout("slow")},
+    ],
+    ids=["5xx", "429", "timeout"],
+)
+async def test_stale_refresh_failure_serves_the_cached_row(
+    session, tmdb, respx_mock, caplog, route_kwargs
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    stale_at = (await session.get(MediaItem, ("movie", 603))).hydrated_at
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(**route_kwargs)
+    items = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in items] == ["Old Matrix"]
+    assert route.called
+    # Still stale, so the next request tries again.
+    assert items[0].hydrated_at == stale_at
+    assert any("movie 603" in m and "serving the cached row" in m for m in _warnings(caplog))
+
+
+async def test_entirely_stale_batch_swallows_auth_error(session, tmdb, respx_mock, caplog):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    await _seed_cached(session, 87101, "Old Terminator", age_days=9)
+    respx_mock.get(url__regex=rf"{BASE_URL}/movie/\d+").mock(return_value=httpx.Response(401))
+    items = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 87101)], settings=SETTINGS
+    )
+    assert [i.name for i in items] == ["Old Matrix", "Old Terminator"]
+    assert any("TmdbAuthError" in m for m in _warnings(caplog))
+
+
+async def test_auth_error_for_a_never_hydrated_title_still_raises(session, tmdb, respx_mock):
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(401))
+    with pytest.raises(TmdbAuthError):
+        await media_service.hydrate_titles(
+            session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+        )
+
+
+async def test_stale_auth_error_raises_when_a_never_hydrated_title_failed(
+    session, tmdb, respx_mock
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(401))
+    respx_mock.get(f"{BASE_URL}/movie/87101").mock(return_value=httpx.Response(500))
+    with pytest.raises(TmdbAuthError):
+        await media_service.hydrate_titles(
+            session, tmdb, [TmdbRef("movie", 87101), TmdbRef("movie", 603)], settings=SETTINGS
+        )
+
+
+async def test_cache_age_boundary_is_exclusive(session, tmdb, tmdb_routes):
+    max_age = SETTINGS.tmdb_cache_max_age_days
+    await _seed_cached(session, 603, "Exactly Max Age", age_days=max_age)
+    await _seed_cached(session, 87101, "A Second Too Old", age_days=max_age, seconds=1)
+    items = await media_service.hydrate_titles(
+        session,
+        tmdb,
+        [TmdbRef("movie", 603), TmdbRef("movie", 87101)],
+        settings=SETTINGS,
+    )
+    assert {i.tmdb_id: i.name for i in items} == {
+        603: "Exactly Max Age",
+        87101: "Terminator Genisys",
+    }
+    assert tmdb_routes["movie_603"].call_count == 0
+    assert tmdb_routes["movie_87101"].call_count == 1
+
+
+async def test_stale_title_that_now_404s_keeps_cached_row_and_is_not_refetched(
+    session, tmdb, respx_mock
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(404))
+    first = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in first] == ["Old Matrix"]
+    assert first[0].hydrated_at == await _db_now(session)
+    again = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in again] == ["Old Matrix"]
+    assert route.call_count == 1

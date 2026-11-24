@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -17,27 +17,47 @@ log = logging.getLogger(__name__)
 
 
 async def get_hydrated(
-    session: AsyncSession,
-    keys: Sequence[MediaKey],
-    *,
-    max_age: timedelta | None = None,
-) -> dict[MediaKey, MediaItem]:
+    session: AsyncSession, keys: Sequence[MediaKey], *, max_age_days: int
+) -> tuple[dict[MediaKey, MediaItem], set[MediaKey]]:
     """Cache lookup: rows for `keys` that have already been hydrated from TMDB.
 
-    When `max_age` is set, rows with `hydrated_at < now - max_age` are treated as stale and
-    omitted so callers re-hydrate them on demand.
+    Returns the rows and, separately, the keys among them that are stale: hydrated more than
+    `max_age_days` ago. A row exactly `max_age_days` old is still fresh. Staleness is decided by
+    the database clock (`now()`), the same one that stamps `hydrated_at`.
     """
     if not keys:
-        return {}
-    conditions = [
-        tuple_(MediaItem.media_type, MediaItem.tmdb_id).in_(list(keys)),
-        MediaItem.hydrated_at.is_not(None),
-    ]
-    if max_age is not None:
-        cutoff = datetime.now(UTC) - max_age
-        conditions.append(MediaItem.hydrated_at >= cutoff)
-    rows = await session.scalars(select(MediaItem).where(*conditions))
-    return {(r.media_type, r.tmdb_id): r for r in rows}
+        return {}, set()
+    stale = MediaItem.hydrated_at < func.now() - timedelta(days=max_age_days)
+    rows = await session.execute(
+        select(MediaItem, stale).where(
+            tuple_(MediaItem.media_type, MediaItem.tmdb_id).in_(list(keys)),
+            MediaItem.hydrated_at.is_not(None),
+        )
+    )
+    items: dict[MediaKey, MediaItem] = {}
+    stale_keys: set[MediaKey] = set()
+    for item, is_stale in rows:
+        key = (item.media_type, item.tmdb_id)
+        items[key] = item
+        if is_stale:
+            stale_keys.add(key)
+    return items, stale_keys
+
+
+async def touch_hydrated(session: AsyncSession, key: MediaKey) -> MediaItem | None:
+    """Mark an already-hydrated row as freshly checked without changing its data."""
+    stmt = (
+        update(MediaItem)
+        .where(
+            MediaItem.media_type == key[0],
+            MediaItem.tmdb_id == key[1],
+            MediaItem.hydrated_at.is_not(None),
+        )
+        .values(hydrated_at=func.now(), updated_at=func.now())
+        .returning(MediaItem)
+        .execution_options(populate_existing=True)
+    )
+    return (await session.scalars(stmt)).one_or_none()
 
 
 async def upsert_hydrated(
