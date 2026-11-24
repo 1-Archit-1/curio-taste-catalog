@@ -2,18 +2,26 @@
   "page": 1,
   "results": [
     {
-      "id": 310,
-      "name": "artificial intelligence (a.i.)"
-    },
-    {
       "id": 4565,
       "name": "dystopia"
     },
     {
-      "id": 1566,
-      "name": "dream"
+      "id": 373759,
+      "name": "youth dystopia"
+    },
+    {
+      "id": 388007,
+      "name": "corporate dystopia"
+    },
+    {
+      "id": 388646,
+      "name": "modern dystopia"
+    },
+    {
+      "id": 379505,
+      "name": "distopía"
     }
   ],
   "total_pages": 1,
-  "total_results": 3
+  "total_results": 17
 }

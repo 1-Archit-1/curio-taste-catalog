@@ -35,6 +35,10 @@ def fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text())
 
 
+def fixture_genres(name: str) -> list[TmdbGenre]:
+    return [TmdbGenre(id=g["id"], name=g["name"]) for g in fixture(name)["genres"]]
+
+
 async def no_sleep(_: float) -> None:
     return None
 
@@ -415,9 +419,11 @@ async def test_search_keywords(respx_mock):
     async with make_client() as client:
         keywords = await client.search_keywords("dystopia", page=2)
     assert keywords == [
-        TmdbKeyword(id=310, name="artificial intelligence (a.i.)"),
         TmdbKeyword(id=4565, name="dystopia"),
-        TmdbKeyword(id=1566, name="dream"),
+        TmdbKeyword(id=373759, name="youth dystopia"),
+        TmdbKeyword(id=388007, name="corporate dystopia"),
+        TmdbKeyword(id=388646, name="modern dystopia"),
+        TmdbKeyword(id=379505, name="distopía"),
     ]
     params = route.calls.last.request.url.params
     assert params["query"] == "dystopia"
@@ -432,7 +438,8 @@ async def test_search_people(respx_mock):
         people = await client.search_people("Keanu", page=3)
     assert people == [
         TmdbPerson(id=6384, name="Keanu Reeves", known_for_department="Acting"),
-        TmdbPerson(id=9339, name="Lana Wachowski", known_for_department="Directing"),
+        TmdbPerson(id=5338366, name="Keanu", known_for_department="Acting"),
+        TmdbPerson(id=3709570, name="Keanu Azka", known_for_department="Acting"),
     ]
     params = route.calls.last.request.url.params
     assert params["query"] == "Keanu"
@@ -453,24 +460,12 @@ async def test_genres_cached_per_media_type(respx_mock):
         tv_second = await client.genres("series")
     assert movie_route.call_count == 1
     assert tv_route.call_count == 1
-    assert (
-        movie_first
-        == movie_second
-        == [
-            TmdbGenre(id=28, name="Action"),
-            TmdbGenre(id=12, name="Adventure"),
-            TmdbGenre(id=878, name="Science Fiction"),
-        ]
-    )
-    assert (
-        tv_first
-        == tv_second
-        == [
-            TmdbGenre(id=18, name="Drama"),
-            TmdbGenre(id=80, name="Crime"),
-            TmdbGenre(id=10765, name="Sci-Fi & Fantasy"),
-        ]
-    )
+    assert movie_first == movie_second == fixture_genres("genres_movie.json")
+    assert movie_first[:2] == [TmdbGenre(id=28, name="Action"), TmdbGenre(id=12, name="Adventure")]
+    assert TmdbGenre(id=878, name="Science Fiction") in movie_first
+    assert tv_first == tv_second == fixture_genres("genres_tv.json")
+    assert TmdbGenre(id=10765, name="Sci-Fi & Fantasy") in tv_first
+    assert TmdbGenre(id=80, name="Crime") in tv_first
 
     clear_genre_cache()
     async with make_client() as client:
@@ -485,8 +480,8 @@ async def test_similar_titles(respx_mock):
     async with make_client() as client:
         refs = await client.similar("movie", 603, page=2)
     assert [(r.media_type, r.tmdb_id, r.name, r.year) for r in refs] == [
-        ("movie", 87101, "Terminator Genisys", 2015),
-        ("movie", 777443, "The Electric State", 2025),
+        ("movie", 647763, "Bongcheon Tiger Lee", 2019),
+        ("movie", 4917, "A Boy and His Dog", 1975),
     ]
     assert route.calls.last.request.url.params["page"] == "2"
 
@@ -506,3 +501,32 @@ async def test_lookup_malformed_responses_raise_tmdb_error(respx_mock, path, cal
     async with make_client() as client:
         with pytest.raises(TmdbError):
             await call(client)
+
+
+@pytest.mark.parametrize(
+    ("path", "call"),
+    [
+        ("/search/keyword", lambda c: c.search_keywords("nothing")),
+        ("/search/person", lambda c: c.search_people("nobody")),
+        ("/genre/movie/list", lambda c: c.genres("movie")),
+        ("/movie/1/similar", lambda c: c.similar("movie", 1)),
+    ],
+)
+async def test_lookups_return_empty_list_on_404(respx_mock, path, call):
+    respx_mock.get(f"{BASE_URL}{path}").mock(return_value=httpx.Response(404))
+    async with make_client() as client:
+        assert await call(client) == []
+
+
+async def test_empty_genre_list_is_not_cached(respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/genre/movie/list").mock(
+        side_effect=[
+            httpx.Response(200, json={"genres": []}),
+            httpx.Response(200, json=fixture("genres_movie.json")),
+        ]
+    )
+    async with make_client() as client:
+        assert await client.genres("movie") == []
+        assert await client.genres("movie") == fixture_genres("genres_movie.json")
+        await client.genres("movie")
+    assert route.call_count == 2

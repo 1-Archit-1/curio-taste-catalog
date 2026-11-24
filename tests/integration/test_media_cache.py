@@ -43,6 +43,12 @@ def tmdb_routes(respx_mock):
         "movie_777443": respx_mock.get(f"{BASE_URL}/movie/777443").mock(
             return_value=httpx.Response(200, json=load("movie_777443.json"))
         ),
+        "movie_647763": respx_mock.get(f"{BASE_URL}/movie/647763").mock(
+            return_value=httpx.Response(200, json=load("movie_647763.json"))
+        ),
+        "movie_4917": respx_mock.get(f"{BASE_URL}/movie/4917").mock(
+            return_value=httpx.Response(200, json=load("movie_4917.json"))
+        ),
         "tv_1396": respx_mock.get(f"{BASE_URL}/tv/1396").mock(
             return_value=httpx.Response(200, json=load("tv_1396.json"))
         ),
@@ -450,7 +456,10 @@ async def test_similar_titles_hydrates_in_order(session, tmdb, tmdb_routes, resp
         return_value=httpx.Response(200, json=load("similar_movie_603.json"))
     )
     items = await media_service.similar_titles(session, tmdb, "movie", 603, settings=SETTINGS)
-    assert [i.imdb_id for i in items] == ["tt1340138", "tt7766378"]
+    # Both titles are hydrated in order; 647763 has no IMDb ID, so it can't be served.
+    assert [i.tmdb_id for i in items] == [4917]
+    assert items[0].imdb_id == "tt0072730"
+    assert tmdb_routes["movie_647763"].call_count == 1
 
 
 async def test_discover_unexcluded_walks_pages_skips_excluded_and_stops_at_limit(

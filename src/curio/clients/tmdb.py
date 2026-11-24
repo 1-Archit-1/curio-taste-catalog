@@ -1,5 +1,9 @@
 """TMDB client: search, discover, recommendations, and one-call title hydration.
 
+Lookups: title search, `discover`, `recommendations`, `similar`, keyword search
+(`search_keywords`), person search (`search_people`), and the official genre lists (`genres`,
+cached per process). A 404 on any list lookup gives an empty list. `hydrate` gives None.
+
 Rules (docs/architecture.md & ADR 0002): httpx only, never the database. The key is passed in
 by the caller (obtained through `services.keys.get_tmdb_key`) and goes straight into the HTTP
 client. It is never logged; see `clients.redaction`.
@@ -277,7 +281,7 @@ class TmdbClient:
             parsed = [TmdbGenre(id=g["id"], name=g["name"]) for g in (data or {}).get("genres", [])]
         except (KeyError, TypeError, AttributeError):
             raise TmdbError("TMDB returned an unexpected response shape") from None
-        if data is not None:
+        if parsed:
             _GENRE_CACHE[media_type] = parsed
         return list(parsed)
 
