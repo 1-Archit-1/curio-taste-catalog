@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from curio import ADDON_NAME
+from curio.api.job_events import JobEventHub, listen_dsn
 from curio.api.routers import addon, control, health, ui
 from curio.db.engine import create_engine, create_session_factory
 from curio.settings import Settings
@@ -32,9 +33,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine = create_engine(settings)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
+        hub = JobEventHub(listen_dsn(engine))
+        app.state.job_event_hub = hub
+        await hub.start()
         try:
             yield
         finally:
+            await hub.stop()
             await engine.dispose()
 
     app = FastAPI(title=ADDON_NAME, lifespan=lifespan)

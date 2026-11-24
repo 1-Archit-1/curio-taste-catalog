@@ -9,14 +9,17 @@ code writing on a second session (the decrypt audit) use `audit_session_factory`
 are invisible to other connections.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi import FastAPI
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -27,6 +30,7 @@ from sqlalchemy.pool import NullPool
 
 from curio.api.app import create_app
 from curio.api.deps import get_session
+from curio.api.job_events import JobEventHub
 from curio.crypto import Keypair, generate_keypair
 from curio.db.engine import to_sqlalchemy_url
 from curio.db.models.users import User
@@ -72,6 +76,9 @@ async def session(migrated_database_url: str) -> AsyncIterator[AsyncSession]:
             expire_on_commit=False,
             join_transaction_mode="create_savepoint",
         )
+        # Routes may call `session.commit()`, which only releases a savepoint here; teardown
+        # code that must release this test's locks rolls back the outer transaction directly.
+        async_session.info["outer_transaction"] = trans
         try:
             yield async_session
         finally:
@@ -117,6 +124,9 @@ async def make_committed_user(
     yield make
 
     await session.rollback()
+    outer = session.info["outer_transaction"]
+    if outer.is_active:
+        await outer.rollback()
     if usernames:
         async with audit_session_factory() as cleanup_session:
             await cleanup_session.execute(delete(User).where(User.username.in_(usernames)))
@@ -126,6 +136,31 @@ async def make_committed_user(
 @pytest.fixture(scope="session")
 def keypair() -> Keypair:
     return generate_keypair()
+
+
+def _build_app(migrated_database_url: str, keypair: Keypair) -> FastAPI:
+    return create_app(
+        Settings(
+            _env_file=None,
+            database_url=migrated_database_url,
+            key_public_key=keypair.public_key,
+            key_private_key=None,
+        )
+    )
+
+
+@asynccontextmanager
+async def _running_hub(app: FastAPI, dsn: str) -> AsyncIterator[None]:
+    """Start the `JobEventHub` that the app lifespan would (tests skip the lifespan)."""
+    hub = JobEventHub(dsn)
+    app.state.job_event_hub = hub
+    await hub.start()
+    try:
+        async with asyncio.timeout(10):
+            await hub.wait_listening()
+        yield
+    finally:
+        await hub.stop()
 
 
 @pytest.fixture
@@ -138,16 +173,12 @@ async def client(
     """API client whose routes share the test's rolled-back session.
 
     Configured with KEY_PUBLIC_KEY only (no KEY_PRIVATE_KEY), matching ADR 0002.
-    The app lifespan is not run, so no engine/pool is opened.
+    The app lifespan is not run, so no engine/pool is opened; the fixture starts the
+    `JobEventHub` that the lifespan would, so SSE routes work. Everything a route writes stays
+    in the test's outer transaction, so other sessions cannot see it; use `committed_client`
+    for tests that need that (SSE authentication, commit-before-respond).
     """
-    app = create_app(
-        Settings(
-            _env_file=None,
-            database_url=migrated_database_url,
-            key_public_key=keypair.public_key,
-            key_private_key=None,
-        )
-    )
+    app = _build_app(migrated_database_url, keypair)
     app.state.session_factory = audit_session_factory
 
     async def test_session() -> AsyncIterator[AsyncSession]:
@@ -155,5 +186,32 @@ async def client(
 
     app.dependency_overrides[get_session] = test_session
     transport = httpx.ASGITransport(app=app)
+    async with (
+        _running_hub(app, migrated_database_url),
+        httpx.AsyncClient(transport=transport, base_url="http://test") as c,
+    ):
+        yield c
+
+
+@pytest.fixture
+async def committed_app(
+    audit_session_factory: async_sessionmaker[AsyncSession],
+    migrated_database_url: str,
+    keypair: Keypair,
+) -> AsyncIterator[FastAPI]:
+    """App whose routes use real, committing sessions (no `get_session` override).
+
+    Users must come from `make_committed_user`, and anything a test reads back must be read
+    through `audit_session_factory`. Tests may change `app.state.settings` fields.
+    """
+    app = _build_app(migrated_database_url, keypair)
+    app.state.session_factory = audit_session_factory
+    async with _running_hub(app, migrated_database_url):
+        yield app
+
+
+@pytest.fixture
+async def committed_client(committed_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    transport = httpx.ASGITransport(app=committed_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

@@ -5,12 +5,20 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
-from curio.api.deps import AppSettings, CurrentUser, DbSession
+from curio.api.deps import (
+    AppSettings,
+    CurrentUser,
+    DbSession,
+    JobEvents,
+    authenticate_request,
+    get_session_factory,
+)
+from curio.api.job_events import TooManyStreamsError
 from curio.api.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -527,13 +535,17 @@ def _event_to_out(event: RunEvent) -> RunEventOut:
     )
 
 
-@router.post("/presets/{preset_id}/regenerate", status_code=status.HTTP_201_CREATED)
+@router.post("/presets/{preset_id}/regenerate", status_code=status.HTTP_202_ACCEPTED)
 async def regenerate_preset(
     preset_id: UUID,
     user: CurrentUser,
     session: DbSession,
 ) -> JobOut:
-    """Enqueue a background `regenerate` job for the preset (409 if one is already active)."""
+    """Queue a background `regenerate` job for the preset.
+
+    Returns 202 once the job is committed. 409 if one is already active or a required key is
+    paused.
+    """
     try:
         job = await jobs_service.enqueue_regenerate_job(
             session,
@@ -550,11 +562,14 @@ async def regenerate_preset(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
-    except jobs_service.DuplicateJobError as exc:
+    except (jobs_service.DuplicateJobError, jobs_service.KeyPausedError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    # Commit before responding: the client opens the SSE stream right away, possibly on another
+    # API worker, and must find the job.
+    await session.commit()
     return _job_to_out(job)
 
 
@@ -609,6 +624,18 @@ async def get_job_status(
 
 
 _SSE_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "paused"})
+_SSE_PING_SECONDS = 15.0
+
+
+def _step_frame(event: RunEvent) -> str:
+    return f"id: {event.id}\nevent: step\ndata: {_event_to_out(event).model_dump_json()}\n\n"
+
+
+def _parse_last_event_id(raw: str | None) -> int:
+    try:
+        return max(int(raw), 0) if raw else 0
+    except ValueError:
+        return 0
 
 
 @router.get(
@@ -619,98 +646,89 @@ _SSE_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "paused"
 async def stream_job_events(
     job_id: UUID,
     request: Request,
-    user: CurrentUser,
-    session: DbSession,
     settings: AppSettings,
+    hub: JobEvents,
 ) -> StreamingResponse:
-    """Stream live job progress over SSE using Postgres LISTEN/NOTIFY.
+    """Stream live job progress over SSE.
 
-    Replays any already-committed `run_events` first so steps emitted before the
-    browser connected are never lost, then wakes on `NOTIFY` until the job ends.
+    Replays committed `run_events` after `Last-Event-ID` (or from the start), then waits for
+    wake-ups from the API process's shared `job_events` listener until the job ends. Steps carry
+    their event id, so a reconnecting `EventSource` resumes where it stopped. A stream ends after
+    `sse_max_stream_seconds`; the browser then reconnects.
+
+    This route holds no database session while streaming. Authentication and the job lookup use
+    one short-lived session, and every wake-up reads on another.
     """
-    # FastAPI runs `get_session`'s commit after sending the 201 response, so an immediate
-    # SSE connection on another API worker may arrive a few milliseconds before commit finishes.
-    job = await jobs_service.get_job(session, user_id=user.id, job_id=job_id)
-    if job is None:
-        session_factory = getattr(request.app.state, "session_factory", None)
-        if session_factory is not None:
-            for _ in range(10):
-                await asyncio.sleep(0.05)
-                async with session_factory() as retry_session:
-                    job = await jobs_service.get_job(retry_session, user_id=user.id, job_id=job_id)
-                if job is not None:
-                    break
+    session_factory = get_session_factory(request)
+    async with session_factory() as auth_session:
+        user = await authenticate_request(request, auth_session, settings)
+        job = await jobs_service.get_job(auth_session, user_id=user.id, job_id=job_id)
+        await auth_session.commit()
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found.",
         )
+    user_id = user.id
+    try:
+        hub.acquire_stream(user_id, settings.sse_max_streams_per_user)
+    except TooManyStreamsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many open job streams. Close one and retry.",
+        ) from exc
+    released = False
 
-    session_factory = request.app.state.session_factory
-    dsn = settings.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    def release() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            hub.release_stream(user_id)
+
+    last_id = _parse_last_event_id(request.headers.get("last-event-id"))
+
+    async def read_progress(after_id: int) -> tuple[list[RunEvent], Job | None]:
+        async with session_factory() as read_session:
+            events = await jobs_service.list_run_events_for_job(
+                read_session,
+                user_id=user_id,
+                job_id=job_id,
+                after_id=after_id,
+            )
+            current_job = await jobs_service.get_job(read_session, user_id=user_id, job_id=job_id)
+        return events, current_job
 
     async def event_stream() -> AsyncIterator[str]:
-        # Dedicated unpooled connection so long-lived LISTEN never exhausts the SQLAlchemy pool.
-        conn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + settings.sse_max_stream_seconds
+        after_id = last_id
         try:
-            await conn.execute(f"LISTEN job_events_{job_id.hex}")
-            last_id = 0
-
-            # Initial replay: catch events committed before LISTEN started.
-            async with session_factory() as read_session:
-                events = await jobs_service.list_run_events_for_job(
-                    read_session,
-                    user_id=user.id,
-                    job_id=job_id,
-                    after_id=last_id,
-                )
-                current_job = await jobs_service.get_job(
-                    read_session,
-                    user_id=user.id,
-                    job_id=job_id,
-                )
-
-            for ev in events:
-                last_id = ev.id
-                yield f"event: step\ndata: {_event_to_out(ev).model_dump_json()}\n\n"
-
-            if current_job is None or current_job.status in _SSE_TERMINAL_STATUSES:
-                if current_job is not None:
-                    yield f"event: status\ndata: {_job_to_out(current_job).model_dump_json()}\n\n"
-                return
-
-            while True:
-                # Block until the worker commits + NOTIFYs, or send a keepalive comment every 15s.
-                received = False
-                async for _notify in conn.notifies(timeout=15.0, stop_after=1):
-                    received = True
-                if not received:
-                    yield ": ping\n\n"
-
-                async with session_factory() as read_session:
-                    events = await jobs_service.list_run_events_for_job(
-                        read_session,
-                        user_id=user.id,
-                        job_id=job_id,
-                        after_id=last_id,
-                    )
-                    current_job = await jobs_service.get_job(
-                        read_session,
-                        user_id=user.id,
-                        job_id=job_id,
-                    )
-
-                for ev in events:
-                    last_id = ev.id
-                    yield f"event: step\ndata: {_event_to_out(ev).model_dump_json()}\n\n"
-
-                if current_job is None or current_job.status in _SSE_TERMINAL_STATUSES:
-                    if current_job is not None:
+            # Subscribe before the first read so an event committed in between wakes us.
+            async with hub.subscribe(job_id) as wakeups:
+                while True:
+                    events, current_job = await read_progress(after_id)
+                    for ev in events:
+                        after_id = ev.id
+                        yield _step_frame(ev)
+                    if current_job is None:
+                        return
+                    if current_job.status in _SSE_TERMINAL_STATUSES:
                         status_json = _job_to_out(current_job).model_dump_json()
                         yield f"event: status\ndata: {status_json}\n\n"
-                    return
+                        return
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        return
+                    try:
+                        await asyncio.wait_for(
+                            wakeups.get(), timeout=min(_SSE_PING_SECONDS, remaining)
+                        )
+                    except TimeoutError:
+                        if loop.time() >= deadline:
+                            return
+                        yield ": ping\n\n"
         finally:
-            await conn.close()
+            release()
 
     return StreamingResponse(
         event_stream(),
@@ -719,4 +737,6 @@ async def stream_job_events(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+        # Covers a client that disconnects before the generator first runs.
+        background=BackgroundTask(release),
     )
