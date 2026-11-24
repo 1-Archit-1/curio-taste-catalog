@@ -49,6 +49,9 @@ def test_models_register_all_expected_tables():
         "source_items",
         "import_issues",
         "source_uploads",
+        "simkl_oauth_states",
+        "simkl_connections",
+        "simkl_revocations",
     }
 
 

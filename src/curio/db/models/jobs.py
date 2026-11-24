@@ -23,7 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from curio.db.models import Base
 
-_JOB_KIND_CHECK = "job_kind IN ('regenerate', 'compile', 'lb_import')"
+_JOB_KIND_CHECK = "job_kind IN ('regenerate', 'compile', 'lb_import', 'simkl_sync', 'simkl_revoke')"
 _JOB_STATUS_CHECK = "status IN ('queued', 'running', 'paused', 'succeeded', 'failed', 'cancelled')"
 _RUN_STATUS_CHECK = "status IN ('running', 'paused', 'succeeded', 'failed')"
 

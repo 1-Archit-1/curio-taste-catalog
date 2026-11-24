@@ -18,6 +18,11 @@ from curio.db.models.catalogs import (  # noqa: E402
 )
 from curio.db.models.jobs import Job, Run, RunEvent  # noqa: E402
 from curio.db.models.keys import KeyDecryptAudit, UserApiKey  # noqa: E402
+from curio.db.models.simkl import (  # noqa: E402
+    SimklConnection,
+    SimklOAuthState,
+    SimklRevocation,
+)
 from curio.db.models.sources import (  # noqa: E402
     ImportIssue,
     Source,
@@ -40,6 +45,9 @@ __all__ = [
     "RunEvent",
     "ServedTitle",
     "Session",
+    "SimklConnection",
+    "SimklOAuthState",
+    "SimklRevocation",
     "Slot",
     "Source",
     "SourceItem",

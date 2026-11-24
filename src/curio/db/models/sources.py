@@ -23,11 +23,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from curio.db.models import Base
 
-_SOURCE_KIND_CHECK = "kind IN ('lb_diary_rss', 'lb_profile_csv', 'lb_list_csv')"
-# Public kinds are shared and have no owner; every other kind belongs to the user who uploaded it.
+_SOURCE_KIND_CHECK = "kind IN ('lb_diary_rss', 'lb_profile_csv', 'lb_list_csv', 'simkl')"
+# Public kinds are shared and have no owner; every other kind (an uploaded export, or a Simkl
+# account) belongs to one user.
 _SOURCE_OWNER_CHECK = "(kind = 'lb_diary_rss') = (owner_user_id IS NULL)"
 _USER_SOURCE_ROLE_CHECK = "role IN ('self', 'taste', 'candidates')"
+# What an export or feed can hold. Import issues only ever carry these kinds.
 _ITEM_KIND_CHECK = "item_kind IN ('watched', 'rating', 'diary', 'watchlist', 'list')"
+# Simkl adds a status per series: `watched` is Simkl's completed, `watching` and `dropped` map
+# onto watch history statuses of the same name (ADR 0009, ADR 0010).
+_SOURCE_ITEM_KIND_CHECK = (
+    "item_kind IN ('watched', 'rating', 'diary', 'watchlist', 'list', 'watching', 'dropped')"
+)
 _MEDIA_TYPE_CHECK = "media_type IN ('movie', 'series')"
 _ISSUE_STATUS_CHECK = "status IN ('pending', 'resolved', 'dismissed')"
 # Ratings use Curio's 0-10 scale (Letterboxd stars x 2) in every table.
@@ -121,7 +128,7 @@ class SourceItem(Base):
     __tablename__ = "source_items"
     __table_args__ = (
         CheckConstraint(_MEDIA_TYPE_CHECK, name="source_items_media_type_check"),
-        CheckConstraint(_ITEM_KIND_CHECK, name="source_items_item_kind_check"),
+        CheckConstraint(_SOURCE_ITEM_KIND_CHECK, name="source_items_item_kind_check"),
         CheckConstraint(_RATING_CHECK, name="source_items_rating_check"),
         ForeignKeyConstraint(
             ["media_type", "tmdb_id"],
