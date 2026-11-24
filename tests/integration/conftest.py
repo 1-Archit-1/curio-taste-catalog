@@ -33,6 +33,8 @@ from curio.api.deps import get_session
 from curio.api.job_events import JobEventHub
 from curio.crypto import Keypair, generate_keypair
 from curio.db.engine import to_sqlalchemy_url
+from curio.db.models.catalogs import MediaItem
+from curio.db.models.sources import Source
 from curio.db.models.users import User
 from curio.services import users as users_service
 from curio.services.users import ProvisionedUser
@@ -131,6 +133,28 @@ async def make_committed_user(
         async with audit_session_factory() as cleanup_session:
             await cleanup_session.execute(delete(User).where(User.username.in_(usernames)))
             await cleanup_session.commit()
+
+
+# TMDB IDs the Letterboxd fixtures and TMDB mocks use.
+LB_FIXTURE_TMDB_IDS = (603, 87101, 1396)
+
+
+@pytest.fixture
+async def clean_lb_data(
+    audit_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[None]:
+    """Remove shared rows that tests with committing sessions leave behind.
+
+    Public sources and cached titles have no owner, so deleting a test's users doesn't remove
+    them. Listed after `make_committed_user`, this runs after the users are gone.
+    """
+    yield
+    async with audit_session_factory() as cleanup_session:
+        await cleanup_session.execute(delete(Source).where(Source.kind == "lb_diary_rss"))
+        await cleanup_session.execute(
+            delete(MediaItem).where(MediaItem.tmdb_id.in_(LB_FIXTURE_TMDB_IDS))
+        )
+        await cleanup_session.commit()
 
 
 @pytest.fixture(scope="session")

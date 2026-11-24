@@ -1,97 +1,30 @@
-"""Integration tests for Issue #5: typed sources, Letterboxd RSS, ZIP import, and issues."""
+"""Integration tests for Issue #5: typed sources, public diary RSS, and import issues over HTTP."""
 
-import io
-import zipfile
 from collections.abc import Awaitable, Callable
-from pathlib import Path
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import httpx
-import pytest
 import respx
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from curio.clients.ratelimit import RateLimiter
-from curio.clients.tmdb import TmdbClient
-from curio.crypto import Keypair
 from curio.db.models.catalogs import MediaItem, WatchHistory
 from curio.db.models.sources import ImportIssue, Source, SourceItem, UserSource
-from curio.services import keys as keys_service
+from curio.repositories import sources as sources_repo
 from curio.services import sources as sources_service
 from curio.services.users import ProvisionedUser
-from curio.settings import Settings
-
-LB_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "letterboxd"
-TMDB_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "tmdb"
-
-
-def _build_fixture_zip() -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for rel in (
-            "profile.csv",
-            "watched.csv",
-            "ratings.csv",
-            "diary.csv",
-            "watchlist.csv",
-            "lists/sci-fi-favorites.csv",
-        ):
-            zf.write(LB_FIXTURES / rel, arcname=rel)
-    return buf.getvalue()
-
-
-async def _login_with_token(c: httpx.AsyncClient, token: str) -> None:
-    resp = await c.post("/api/auth/login", json={"token": token})
-    assert resp.status_code == 200
-
-
-def _mock_tmdb_for_zip(respx_mock: respx.MockRouter) -> None:
-    movie_603 = (TMDB_FIXTURES / "movie_603.json").read_text(encoding="utf-8")
-    movie_87101 = (TMDB_FIXTURES / "movie_87101.json").read_text(encoding="utf-8")
-
-    def search_handler(request: httpx.Request) -> httpx.Response:
-        query = (request.url.params.get("query") or "").lower()
-        if "matrix" in query:
-            return httpx.Response(
-                200,
-                json={
-                    "results": [{"id": 603, "title": "The Matrix", "release_date": "1999-03-31"}]
-                },
-            )
-        if "terminator" in query:
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": 87101, "title": "Terminator Genisys", "release_date": "2015-07-01"}
-                    ]
-                },
-            )
-        if "ambiguous" in query:
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": 603, "title": "Something Different", "release_date": "2020-01-01"}
-                    ]
-                },
-            )
-        return httpx.Response(200, json={"results": []})
-
-    respx_mock.get("https://api.themoviedb.org/3/search/movie").mock(side_effect=search_handler)
-    respx_mock.get("https://api.themoviedb.org/3/movie/603").mock(
-        return_value=httpx.Response(200, text=movie_603)
-    )
-    respx_mock.get("https://api.themoviedb.org/3/movie/87101").mock(
-        return_value=httpx.Response(200, text=movie_87101)
-    )
+from tests.integration.lb_support import LB_FIXTURES, RSS_URL, login
 
 
 async def test_sources_reject_unauthenticated_requests(client: httpx.AsyncClient):
     assert (await client.get("/api/sources")).status_code == 401
     assert (await client.post("/api/sources/preview", json={"input": "alice"})).status_code == 401
     assert (await client.get("/api/import-issues")).status_code == 401
+    zip_resp = await client.post(
+        "/api/sources/import-zip", files={"file": ("export.zip", b"PK", "application/zip")}
+    )
+    assert zip_resp.status_code == 401
 
 
 async def test_rss_preview_add_shared_refresh_role_and_remove(
@@ -100,17 +33,13 @@ async def test_rss_preview_add_shared_refresh_role_and_remove(
     respx_mock: respx.MockRouter,
     make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
 ):
+    """RSS needs no TMDB key (none exists here). Titles get stubs; history rows carry the source."""
     rss_xml = (LB_FIXTURES / "diary_rss.xml").read_text(encoding="utf-8")
-    rss_route = respx_mock.get("https://letterboxd.com/alice/rss/").mock(
-        return_value=httpx.Response(200, text=rss_xml)
-    )
-
+    rss_route = respx_mock.get(RSS_URL).mock(return_value=httpx.Response(200, text=rss_xml))
     alice = await make_committed_user("rss_alice")
     bob = await make_committed_user("rss_bob")
+    await login(client, alice.login_token)
 
-    await _login_with_token(client, alice.login_token)
-
-    # Preview RSS feed
     prev_resp = await client.post(
         "/api/sources/preview", json={"input": "https://letterboxd.com/alice/"}
     )
@@ -119,283 +48,250 @@ async def test_rss_preview_add_shared_refresh_role_and_remove(
     assert prev_data["username"] == "alice"
     assert prev_data["entry_count"] == 2
     assert prev_data["recent_titles"][0]["title"] == "The Matrix"
+    assert prev_data["recent_titles"][0]["rating"] == 10.0
 
-    # Alice adds her own diary RSS with role='self'
     add_resp = await client.post("/api/sources", json={"input": "alice", "role": "self"})
     assert add_resp.status_code == 201
     alice_source = add_resp.json()
     assert alice_source["kind"] == "lb_diary_rss"
     assert alice_source["role"] == "self"
     assert alice_source["item_count"] == 2
+    assert alice_source["last_refreshed_at"] is not None
     source_id = UUID(alice_source["id"])
 
-    # Alice's watch_history is synced (5.0 stars -> 10.0 on Curio scale)
+    stored = await session.scalar(select(Source).where(Source.id == source_id))
+    assert stored is not None
+    assert stored.owner_user_id is None
+    assert stored.next_refresh_at is not None
+    assert stored.next_refresh_at > datetime.now(UTC)
+    matrix = await session.scalar(select(MediaItem).where(MediaItem.tmdb_id == 603))
+    assert matrix is not None
+    assert (matrix.name, matrix.year, matrix.hydrated_at) == ("The Matrix", 1999, None)
+
     wh_rows = list(
         await session.scalars(select(WatchHistory).where(WatchHistory.user_id == alice.user.id))
     )
-    assert len(wh_rows) == 2
     by_id = {(r.media_type, r.tmdb_id): r for r in wh_rows}
+    assert set(by_id) == {("movie", 603), ("series", 1396)}
     assert by_id[("movie", 603)].rating == 10.0
     assert by_id[("movie", 603)].source == "letterboxd"
+    assert by_id[("movie", 603)].source_id == source_id
     assert by_id[("series", 1396)].rating == 9.0
 
-    # Bob subscribes to the same shared source with role='taste'
-    await _login_with_token(client, bob.login_token)
+    # Bob subscribes to the same shared source as a friend. It is stored and fetched once.
+    await login(client, bob.login_token)
     bob_add = await client.post(
         "/api/sources", json={"input": "https://letterboxd.com/alice/", "role": "taste"}
     )
     assert bob_add.status_code == 201
     assert bob_add.json()["id"] == alice_source["id"]
+    assert await session.scalar(select(func.count()).select_from(Source)) == 1
+    bob_history = select(func.count()).select_from(WatchHistory)
+    bob_history = bob_history.where(WatchHistory.user_id == bob.user.id)
+    assert await session.scalar(bob_history) == 0
 
-    # Only one shared Source row exists in DB
-    source_count = await session.scalar(
-        select(func.count()).select_from(Source).where(Source.id == source_id)
-    )
-    assert source_count == 1
-
-    # Bob has no watch_history yet because his role is 'taste'
-    bob_wh_count = await session.scalar(
-        select(func.count()).select_from(WatchHistory).where(WatchHistory.user_id == bob.user.id)
-    )
-    assert bob_wh_count == 0
-
-    # Refreshing once fetches the shared RSS feed once
     calls_before = rss_route.call_count
     refresh_resp = await client.post(f"/api/sources/{source_id}/refresh")
     assert refresh_resp.status_code == 200
     assert rss_route.call_count == calls_before + 1
 
-    # Changing Bob's role to 'self' syncs his watch_history
+    # Becoming `self` writes Bob's history; leaving `self` removes it again.
     patch_resp = await client.patch(f"/api/sources/{source_id}", json={"role": "self"})
     assert patch_resp.status_code == 200
     assert patch_resp.json()["role"] == "self"
-    bob_wh_count = await session.scalar(
-        select(func.count()).select_from(WatchHistory).where(WatchHistory.user_id == bob.user.id)
-    )
-    assert bob_wh_count == 2
+    assert await session.scalar(bob_history) == 2
+    await client.patch(f"/api/sources/{source_id}", json={"role": "taste"})
+    assert await session.scalar(bob_history) == 0
+    await client.patch(f"/api/sources/{source_id}", json={"role": "self"})
+    assert await session.scalar(bob_history) == 2
 
-    # Bob removes his subscription; shared Source & Alice's subscription remain
+    # Unsubscribing removes what the source wrote for Bob; Alice and the source stay.
     del_resp = await client.delete(f"/api/sources/{source_id}")
     assert del_resp.status_code == 200
-    assert (await session.scalar(select(Source).where(Source.id == source_id))) is not None
-    assert (
-        await session.scalar(
-            select(UserSource).where(
-                UserSource.user_id == alice.user.id, UserSource.source_id == source_id
-            )
-        )
-    ) is not None
+    assert await session.scalar(bob_history) == 0
+    assert await session.scalar(select(Source).where(Source.id == source_id)) is not None
+    alice_link = select(UserSource).where(
+        UserSource.user_id == alice.user.id, UserSource.source_id == source_id
+    )
+    assert await session.scalar(alice_link) is not None
+    alice_history = select(func.count()).select_from(WatchHistory)
+    alice_history = alice_history.where(WatchHistory.user_id == alice.user.id)
+    assert await session.scalar(alice_history) == 2
 
 
-async def test_zip_import_service_with_encrypted_key_and_audit(
-    session: AsyncSession,
-    audit_session_factory: async_sessionmaker[AsyncSession],
-    migrated_database_url: str,
+async def test_rss_errors_map_to_http_statuses(
+    client: httpx.AsyncClient,
     respx_mock: respx.MockRouter,
-    keypair: Keypair,
     make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
 ):
-    """Verify ZIP import & issue resolution decrypt the user's TMDB key via ADR 0002."""
-    provisioned = await make_committed_user("zip_svc_alice")
-    respx_mock.get("https://api.themoviedb.org/3/configuration").mock(
-        return_value=httpx.Response(200, json={"images": {}})
-    )
-    await keys_service.set_user_api_key(
+    respx_mock.get("https://letterboxd.com/missing/rss/").mock(return_value=httpx.Response(404))
+    user = await make_committed_user("rss_errors_user")
+    await login(client, user.login_token)
+    assert (await client.post("/api/sources", json={"input": "missing"})).status_code == 404
+    assert (await client.post("/api/sources", json={"input": "bad user!"})).status_code == 400
+    refresh = await client.post(f"/api/sources/{uuid4()}/refresh")
+    assert refresh.status_code == 404
+
+
+async def _seed_issue(
+    session: AsyncSession,
+    *,
+    user: ProvisionedUser,
+    candidates: list[dict[str, object]],
+    raw_title: str = "Ambiguous Title",
+    raw_year: int | None = 2020,
+    item_kind: str = "rating",
+    role: str = "self",
+):
+    source = await sources_repo.get_or_create_source(
         session,
-        user_id=provisioned.user.id,
-        key_type=keys_service.KeyType.TMDB,
-        api_key="fake-tmdb-key-1234",
-        public_key=keypair.public_key,
+        kind="lb_profile_csv",
+        owner_user_id=user.user.id,
+        external_key="profile",
+        label="Letterboxd Export",
+        url=None,
     )
-    await session.flush()
-
-    _mock_tmdb_for_zip(respx_mock)
-    worker_settings = Settings(
-        _env_file=None,
-        database_url=migrated_database_url,
-        key_public_key=keypair.public_key,
-        key_private_key=keypair.private_key,
+    await sources_service.subscribe_user_to_source(
+        session, user_id=user.user.id, source=source, role=role
     )
-
-    result = await sources_service.import_zip_sources(
+    issue, _ = await sources_repo.upsert_import_issue(
         session,
-        user_id=provisioned.user.id,
-        zip_bytes=_build_fixture_zip(),
-        role="self",
-        settings=worker_settings,
-        audit_session_factory=audit_session_factory,
+        user_id=user.user.id,
+        source_id=source.id,
+        item_kind=item_kind,
+        raw_title=raw_title,
+        raw_year=raw_year,
+        letterboxd_url="https://boxd.it/x",
+        rating=7.0,
+        watched_at=datetime(2026, 10, 1, tzinfo=UTC),
+        confidence=0.6,
+        candidate_matches=candidates,
     )
-    assert len(result.sources) == 2
-    assert result.matched_count == 5
-    assert result.issue_count == 1
-
-    issues, pending = await sources_service.list_import_issues(
-        session, user_id=provisioned.user.id, status="pending"
-    )
-    assert pending == 1
-
-    resolved = await sources_service.resolve_import_issue(
-        session,
-        user_id=provisioned.user.id,
-        issue_id=issues[0].id,
-        media_type="movie",
-        tmdb_id=87101,
-        settings=worker_settings,
-        audit_session_factory=audit_session_factory,
-    )
-    assert resolved.status == "resolved"
-    assert resolved.resolved_tmdb_id == 87101
+    return source, issue
 
 
-async def test_zip_import_endpoints_idempotent_and_issue_actions(
+async def test_resolve_import_issue_writes_stub_item_and_history_without_tmdb(
     client: httpx.AsyncClient,
     session: AsyncSession,
     respx_mock: respx.MockRouter,
-    monkeypatch: pytest.MonkeyPatch,
     make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
 ):
-    provisioned = await make_committed_user("zip_http_alice")
-    await _login_with_token(client, provisioned.login_token)
+    user = await make_committed_user("resolve_user")
+    await login(client, user.login_token)
+    candidate = {
+        "media_type": "movie",
+        "tmdb_id": 87101,
+        "name": "Terminator Genisys",
+        "year": 2015,
+        "confidence": 0.6,
+    }
+    source, issue = await _seed_issue(session, user=user, candidates=[candidate])
 
-    zip_bytes = _build_fixture_zip()
-    # Without TMDB key / private key, ZIP import returns 400
-    no_key_resp = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "self"},
-    )
-    assert no_key_resp.status_code == 400
-
-    _mock_tmdb_for_zip(respx_mock)
-
-    async def fake_tmdb_client_for_user(*args, **kwargs) -> TmdbClient:
-        return TmdbClient("fake-tmdb-key-1234", RateLimiter(100.0))
-
-    monkeypatch.setattr(
-        sources_service.media_service, "tmdb_client_for_user", fake_tmdb_client_for_user
-    )
-
-    # First ZIP import
     resp = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "self"},
+        f"/api/import-issues/{issue.id}/resolve", json={"media_type": "movie", "tmdb_id": 87101}
     )
     assert resp.status_code == 200
-    body = resp.json()
-    assert len(body["sources"]) == 2
-    assert body["matched_count"] == 5
-    assert body["issue_count"] == 1
+    assert resp.json()["status"] == "resolved"
+    assert resp.json()["resolved_tmdb_id"] == 87101
 
-    # Verify watch_history has The Matrix but NOT Terminator Genisys (watchlist)
-    wh_rows = list(
-        await session.scalars(
-            select(WatchHistory).where(WatchHistory.user_id == provisioned.user.id)
-        )
+    stub = await session.scalar(select(MediaItem).where(MediaItem.tmdb_id == 87101))
+    assert stub is not None
+    assert (stub.name, stub.year, stub.hydrated_at) == ("Terminator Genisys", 2015, None)
+    item = await session.scalar(select(SourceItem).where(SourceItem.source_id == source.id))
+    assert item is not None
+    assert (item.tmdb_id, item.item_kind, item.rating) == (87101, "rating", 7.0)
+    history = await session.scalar(select(WatchHistory).where(WatchHistory.user_id == user.user.id))
+    assert history is not None
+    assert (history.tmdb_id, history.rating, history.source_id) == (87101, 7.0, source.id)
+    refreshed = await session.scalar(select(Source).where(Source.id == source.id))
+    assert refreshed is not None
+    assert refreshed.item_count == 1
+    assert respx_mock.calls.call_count == 0
+
+    # A resolved issue cannot be resolved again.
+    again = await client.post(
+        f"/api/import-issues/{issue.id}/resolve", json={"media_type": "movie", "tmdb_id": 603}
     )
-    assert [(r.media_type, r.tmdb_id) for r in wh_rows] == [("movie", 603)]
-    assert wh_rows[0].rating == 10.0
-
-    # Verify watchlist item is stored as SourceItem(item_kind='watchlist')
-    wl_item = await session.scalar(
-        select(SourceItem).where(SourceItem.tmdb_id == 87101, SourceItem.item_kind == "watchlist")
-    )
-    assert wl_item is not None
-
-    # Verify MediaItem was hydrated
-    matrix = await session.scalar(
-        select(MediaItem).where(MediaItem.media_type == "movie", MediaItem.tmdb_id == 603)
-    )
-    assert matrix is not None
-    assert matrix.hydrated_at is not None
-
-    # Re-import is idempotent
-    resp2 = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "self"},
-    )
-    assert resp2.status_code == 200
-    issues_resp = await client.get("/api/import-issues", params={"status": "pending"})
-    assert issues_resp.status_code == 200
-    issues_data = issues_resp.json()
-    assert issues_data["pending_count"] == 1
-    issue_id = issues_data["issues"][0]["id"]
-    assert issues_data["issues"][0]["raw_title"] == "Ambiguous Title"
-    assert len(issues_data["issues"][0]["candidate_matches"]) == 1
-
-    # Resolve the import issue to TMDB 87101
-    resolve_resp = await client.post(
-        f"/api/import-issues/{issue_id}/resolve",
-        json={"media_type": "movie", "tmdb_id": 87101},
-    )
-    assert resolve_resp.status_code == 200
-    assert resolve_resp.json()["status"] == "resolved"
-    assert resolve_resp.json()["resolved_tmdb_id"] == 87101
-
-    wh_87101 = await session.scalar(
-        select(WatchHistory).where(
-            WatchHistory.user_id == provisioned.user.id,
-            WatchHistory.media_type == "movie",
-            WatchHistory.tmdb_id == 87101,
-        )
-    )
-    assert wh_87101 is not None
-
-    # Re-importing after resolution does not recreate the pending issue
-    resp3 = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "self"},
-    )
-    assert resp3.status_code == 200
-    assert resp3.json()["issue_count"] == 0
-    assert resp3.json()["skipped_count"] == 1
+    assert again.status_code == 409
 
 
-async def test_dismiss_import_issue_prevents_recreation(
+async def test_resolve_uses_raw_title_when_the_choice_is_not_a_candidate(
     client: httpx.AsyncClient,
     session: AsyncSession,
     respx_mock: respx.MockRouter,
-    monkeypatch: pytest.MonkeyPatch,
     make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
 ):
-    provisioned = await make_committed_user("dismiss_alice")
-    await _login_with_token(client, provisioned.login_token)
-
-    _mock_tmdb_for_zip(respx_mock)
-
-    async def fake_tmdb_client_for_user(*args, **kwargs) -> TmdbClient:
-        return TmdbClient("fake-tmdb-key-1234", RateLimiter(100.0))
-
-    monkeypatch.setattr(
-        sources_service.media_service, "tmdb_client_for_user", fake_tmdb_client_for_user
+    user = await make_committed_user("resolve_raw_user")
+    await login(client, user.login_token)
+    _, issue = await _seed_issue(
+        session, user=user, candidates=[], raw_title="Unknown Short", raw_year=2021
     )
 
-    zip_bytes = _build_fixture_zip()
     resp = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "taste"},
+        f"/api/import-issues/{issue.id}/resolve", json={"media_type": "series", "tmdb_id": 555}
     )
     assert resp.status_code == 200
-
-    issue = list(
-        await session.scalars(select(ImportIssue).where(ImportIssue.user_id == provisioned.user.id))
-    )[0]
-
-    dismiss_resp = await client.post(f"/api/import-issues/{issue.id}/dismiss")
-    assert dismiss_resp.status_code == 200
-    assert dismiss_resp.json()["status"] == "dismissed"
-
-    resp2 = await client.post(
-        "/api/sources/import-zip",
-        files={"file": ("export.zip", zip_bytes, "application/zip")},
-        data={"role": "taste"},
+    stub = await session.scalar(
+        select(MediaItem).where(MediaItem.media_type == "series", MediaItem.tmdb_id == 555)
     )
-    assert resp2.status_code == 200
-    assert resp2.json()["issue_count"] == 0
-    assert resp2.json()["skipped_count"] == 1
-    assert await sources_service.list_import_issues(
-        session, user_id=provisioned.user.id, status="pending"
-    ) == ([], 0)
+    assert stub is not None
+    assert (stub.name, stub.year) == ("Unknown Short", 2021)
+    assert respx_mock.calls.call_count == 0
+
+
+async def test_resolve_rejects_out_of_range_ids_and_unknown_issues(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
+):
+    user = await make_committed_user("resolve_invalid_user")
+    await login(client, user.login_token)
+    _, issue = await _seed_issue(session, user=user, candidates=[])
+    url = f"/api/import-issues/{issue.id}/resolve"
+    for body in (
+        {"media_type": "movie", "tmdb_id": 0},
+        {"media_type": "movie", "tmdb_id": 2**31},
+        {"media_type": "tv", "tmdb_id": 1},
+    ):
+        assert (await client.post(url, json=body)).status_code == 422
+    missing = await client.post(
+        f"/api/import-issues/{uuid4()}/resolve", json={"media_type": "movie", "tmdb_id": 1}
+    )
+    assert missing.status_code == 404
+
+
+async def test_other_users_cannot_resolve_or_dismiss_an_issue(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
+):
+    owner = await make_committed_user("issue_owner")
+    other = await make_committed_user("issue_other")
+    _, issue = await _seed_issue(session, user=owner, candidates=[])
+    await login(client, other.login_token)
+    resolve = await client.post(
+        f"/api/import-issues/{issue.id}/resolve", json={"media_type": "movie", "tmdb_id": 1}
+    )
+    assert resolve.status_code == 404
+    assert (await client.post(f"/api/import-issues/{issue.id}/dismiss")).status_code == 404
+    assert (await client.get("/api/import-issues")).json()["issues"] == []
+
+
+async def test_dismiss_import_issue(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    make_committed_user: Callable[[str], Awaitable[ProvisionedUser]],
+):
+    user = await make_committed_user("dismiss_user")
+    await login(client, user.login_token)
+    _, issue = await _seed_issue(session, user=user, candidates=[])
+    pending = await client.get("/api/import-issues", params={"status": "pending"})
+    assert pending.json()["pending_count"] == 1
+    dismiss = await client.post(f"/api/import-issues/{issue.id}/dismiss")
+    assert dismiss.status_code == 200
+    assert dismiss.json()["status"] == "dismissed"
+    stored = await session.scalar(select(ImportIssue).where(ImportIssue.id == issue.id))
+    assert stored is not None
+    assert stored.status == "dismissed"
+    pending = await client.get("/api/import-issues", params={"status": "pending"})
+    assert pending.json() == {"issues": [], "pending_count": 0}

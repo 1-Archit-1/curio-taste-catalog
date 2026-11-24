@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Job queue (#25). A running job holds a lease that its worker renews every lease/3 seconds;
     # another worker reclaims the job once the lease has expired.
     job_lease_seconds: int = Field(default=120, ge=10)
+    # Public Letterboxd diary RSS sources are polled by the worker at most this often (#5).
+    rss_refresh_interval_hours: int = Field(default=6, ge=1)
+
     # SSE job streams (#25). Limits are per API process.
     sse_max_streams_per_user: int = Field(default=5, ge=1)
     sse_max_stream_seconds: float = Field(default=1800.0, gt=0)

@@ -53,6 +53,20 @@ async def get_job(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def has_active_job(session: AsyncSession, *, user_id: UUID, job_kind: str) -> bool:
+    """Whether the user has a `queued`, `running` or `paused` job of this kind."""
+    stmt = select(
+        select(Job.id)
+        .where(
+            Job.user_id == user_id,
+            Job.job_kind == job_kind,
+            Job.status.in_(("queued", "running", "paused")),
+        )
+        .exists()
+    )
+    return bool(await session.scalar(stmt))
+
+
 async def get_latest_preset_job(
     session: AsyncSession,
     *,

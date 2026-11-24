@@ -88,12 +88,10 @@ from curio.api.schemas.sources import (
     SourcePreviewResponse,
     SourceRole,
     SourceUpdateRequest,
-    ZipImportResponse,
 )
-from curio.clients.letterboxd import LetterboxdError, LetterboxdNotFoundError
+from curio.clients.letterboxd import MAX_ZIP_BYTES, LetterboxdError, LetterboxdNotFoundError
 from curio.clients.providers import LLM_PROVIDERS, KeyType
-from curio.clients.tmdb import TmdbAuthError, TmdbError
-from curio.crypto import PrivateKeyNotConfiguredError, PublicKeyNotConfiguredError
+from curio.crypto import PublicKeyNotConfiguredError
 from curio.db.models.jobs import Job, Run, RunEvent
 from curio.db.models.sources import ImportIssue
 from curio.db.models.users import User
@@ -863,11 +861,11 @@ async def preview_source(
 @router.post("/sources", status_code=status.HTTP_201_CREATED)
 async def create_source(
     payload: SourceCreateRequest,
-    request: Request,
     user: CurrentUser,
     session: DbSession,
     settings: AppSettings,
 ) -> SourceOut:
+    """Subscribe to a public Letterboxd diary RSS feed. Needs no TMDB key."""
     try:
         summary = await sources_service.add_rss_source(
             session,
@@ -875,16 +873,11 @@ async def create_source(
             input_value=payload.input,
             role=payload.role,
             settings=settings,
-            audit_session_factory=get_session_factory(request),
         )
     except LetterboxdNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except LetterboxdError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
     return _source_to_out(summary)
 
 
@@ -932,13 +925,14 @@ async def refresh_source(
     session: DbSession,
     settings: AppSettings,
 ) -> SourceOut:
+    """Fetch a public RSS source now. Needs no TMDB key."""
     try:
-        result = await sources_service.refresh_rss_source(
+        summary = await sources_service.refresh_rss_source(
             session,
+            session_factory=get_session_factory(request),
             source_id=source_id,
             user_id=user.id,
             settings=settings,
-            audit_session_factory=get_session_factory(request),
         )
     except sources_service.SourceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
@@ -948,51 +942,66 @@ async def refresh_source(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except LetterboxdError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
-    assert isinstance(result, sources_service.SourceSummary)
-    return _source_to_out(result)
+    return _source_to_out(summary)
 
 
-@router.post("/sources/import-zip")
+# Starlette parses the multipart body before the route runs, so this limit is applied to a body
+# that has been received. A reverse proxy should also cap request bodies (see docs/architecture.md).
+_UPLOAD_READ_CHUNK = 1024 * 1024
+_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+_UPLOAD_TOO_LARGE = "Export ZIP exceeds the 50 MB size limit."
+
+
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    data = bytearray()
+    while chunk := await file.read(_UPLOAD_READ_CHUNK):
+        data.extend(chunk)
+        if len(data) > MAX_ZIP_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=_UPLOAD_TOO_LARGE
+            )
+    return bytes(data)
+
+
+@router.post("/sources/import-zip", status_code=status.HTTP_202_ACCEPTED)
 async def import_zip_source(
     request: Request,
     user: CurrentUser,
     session: DbSession,
-    settings: AppSettings,
     file: Annotated[UploadFile, File(...)],
     role: Annotated[SourceRole, Form()] = "self",
-) -> ZipImportResponse:
-    zip_bytes = await file.read()
+) -> JobOut:
+    """Queue a background `lb_import` job for an uploaded Letterboxd export ZIP.
+
+    Matching titles needs the user's TMDB key, which only workers can decrypt. Returns 202 with
+    the job once it is committed; follow it at `/api/jobs/{id}`. 413 if the file is over 50 MB,
+    422 if no TMDB key is configured, 409 if the key is paused or an import is already running.
+    """
+    declared = request.headers.get("content-length", "")
+    if declared.isdecimal() and int(declared) > MAX_ZIP_BYTES + _MULTIPART_OVERHEAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=_UPLOAD_TOO_LARGE)
+    data = await _read_upload_limited(file)
     try:
-        result = await sources_service.import_zip_sources(
+        job = await jobs_service.enqueue_lb_import_job(
             session,
             user_id=user.id,
-            zip_bytes=zip_bytes,
+            filename=(file.filename or "export.zip")[:255],
+            data=data,
             role=role,
-            settings=settings,
-            audit_session_factory=get_session_factory(request),
         )
-    except LetterboxdError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except (keys_service.KeyNotFoundError, PrivateKeyNotConfiguredError):
+    except jobs_service.MissingRequiredKeysError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Configure your TMDB API key in Settings before importing a Letterboxd ZIP.",
-        ) from None
-    except TmdbAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
-
-    return ZipImportResponse(
-        sources=[_source_to_out(s) for s in result.sources],
-        matched_count=result.matched_count,
-        issue_count=result.issue_count,
-        skipped_count=result.skipped_count,
-    )
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except (jobs_service.DuplicateJobError, jobs_service.KeyPausedError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    # Commit before responding: the client polls the job right away, possibly on another worker.
+    await session.commit()
+    return _job_to_out(job)
 
 
 @router.get("/import-issues")
@@ -1016,11 +1025,10 @@ async def list_import_issues(
 async def resolve_import_issue(
     issue_id: UUID,
     payload: ImportIssueResolveRequest,
-    request: Request,
     user: CurrentUser,
     session: DbSession,
-    settings: AppSettings,
 ) -> ImportIssueOut:
+    """Match an import issue to a TMDB title. Stores a stub from the data at hand; no TMDB call."""
     try:
         issue = await sources_service.resolve_import_issue(
             session,
@@ -1028,22 +1036,11 @@ async def resolve_import_issue(
             issue_id=issue_id,
             media_type=payload.media_type,
             tmdb_id=payload.tmdb_id,
-            settings=settings,
-            audit_session_factory=get_session_factory(request),
         )
     except sources_service.ImportIssueNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except sources_service.InvalidSourceOperationError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
-    except (keys_service.KeyNotFoundError, PrivateKeyNotConfiguredError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Configure your TMDB API key in Settings before resolving import issues.",
-        ) from None
-    except TmdbAuthError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
-    except TmdbError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     return _issue_to_out(issue)
 
 

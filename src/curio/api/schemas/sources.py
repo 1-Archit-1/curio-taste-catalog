@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from curio.api.schemas.catalogs import MediaType
 
+# TMDB IDs are stored in a 32-bit integer column.
+MAX_TMDB_ID = 2_147_483_647
 SourceKind = Literal["lb_diary_rss", "lb_profile_csv", "lb_list_csv"]
 SourceRole = Literal["self", "taste", "candidates"]
 ImportItemKind = Literal["watched", "rating", "diary", "watchlist", "list"]
@@ -29,6 +31,7 @@ class SourceOut(BaseModel):
     url: str | None = None
     role: SourceRole
     item_count: int
+    # For an export source, when it was last imported.
     last_refreshed_at: datetime | None = None
     last_error: str | None = None
     created_at: datetime
@@ -51,6 +54,7 @@ class SourcePreviewRequest(BaseModel):
 class SourcePreviewItemOut(BaseModel):
     title: str
     year: int | None = None
+    # Curio's 0-10 scale (Letterboxd stars x 2).
     rating: float | None = None
     watched_at: datetime | None = None
     tmdb_id: int | None = None
@@ -79,13 +83,6 @@ class SourceUpdateRequest(BaseModel):
     role: SourceRole
 
 
-class ZipImportResponse(BaseModel):
-    sources: list[SourceOut]
-    matched_count: int
-    issue_count: int
-    skipped_count: int
-
-
 class CandidateMatchOut(BaseModel):
     media_type: MediaType
     tmdb_id: int
@@ -101,6 +98,7 @@ class ImportIssueOut(BaseModel):
     raw_title: str
     raw_year: int | None = None
     letterboxd_url: str | None = None
+    # Curio's 0-10 scale (Letterboxd stars x 2).
     rating: float | None = None
     watched_at: datetime | None = None
     confidence: float | None = None
@@ -119,4 +117,4 @@ class ImportIssueListResponse(BaseModel):
 
 class ImportIssueResolveRequest(BaseModel):
     media_type: MediaType = "movie"
-    tmdb_id: int = Field(ge=1)
+    tmdb_id: int = Field(ge=1, le=MAX_TMDB_ID)

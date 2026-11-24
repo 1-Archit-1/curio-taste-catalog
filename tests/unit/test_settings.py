@@ -24,3 +24,11 @@ def test_embedding_batch_size_bounds_are_accepted(size):
         _env_file=None, database_url="postgresql://unused", embedding_batch_size=size
     )
     assert settings.embedding_batch_size == size
+
+
+def test_rss_refresh_interval_defaults_to_six_hours_and_must_be_positive():
+    assert (
+        Settings(_env_file=None, database_url="postgresql://unused").rss_refresh_interval_hours == 6
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="postgresql://unused", rss_refresh_interval_hours=0)

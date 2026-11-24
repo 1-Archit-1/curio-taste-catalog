@@ -64,7 +64,12 @@ def _iter_property_names(node: Any, components: dict[str, Any], seen: set[str]) 
 
 
 # Routes that queue background work and answer 202 Accepted instead of 200/201.
-ACCEPTED_ROUTES = frozenset({("post", "/api/presets/{preset_id}/regenerate")})
+ACCEPTED_ROUTES = frozenset(
+    {
+        ("post", "/api/presets/{preset_id}/regenerate"),
+        ("post", "/api/sources/import-zip"),
+    }
+)
 
 
 def test_every_control_plane_route_declares_typed_response_model():
