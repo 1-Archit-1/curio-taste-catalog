@@ -63,6 +63,10 @@ def _iter_property_names(node: Any, components: dict[str, Any], seen: set[str]) 
     return names
 
 
+# Routes that queue background work and answer 202 Accepted instead of 200/201.
+ACCEPTED_ROUTES = frozenset({("post", "/api/presets/{preset_id}/regenerate")})
+
+
 def test_every_control_plane_route_declares_typed_response_model():
     schema = create_app(SETTINGS).openapi()
     api_paths = {p: ops for p, ops in schema["paths"].items() if p.startswith("/api/")}
@@ -74,6 +78,8 @@ def test_every_control_plane_route_declares_typed_response_model():
                 continue
             responses = op.get("responses", {})
             ok_resp = responses.get("200") or responses.get("201")
+            if (method.lower(), path) in ACCEPTED_ROUTES:
+                ok_resp = responses.get("202")
             assert ok_resp is not None, f"{method.upper()} {path} missing 200/201 response"
             content = ok_resp.get("content", {})
             if "text/event-stream" in content and "application/json" not in content:

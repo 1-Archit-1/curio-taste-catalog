@@ -40,6 +40,30 @@ def test_migrations_apply_to_empty_database_and_are_idempotent(empty_database_ur
     assert has_vector is not None
 
 
+def test_latest_migration_downgrades_and_upgrades_cleanly(empty_database_url):
+    cfg = make_alembic_config(empty_database_url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0003")
+    with psycopg.connect(empty_database_url) as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+            )
+        }
+        key_columns = {
+            r[0]
+            for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'user_api_keys'"
+            )
+        }
+    assert tables.isdisjoint({"jobs", "runs", "run_events", "served_titles"})
+    assert not key_columns & {"paused_reason", "paused_at"}
+    command.upgrade(cfg, "head")
+    command.check(cfg)
+
+
 def test_concurrent_runs_apply_each_migration_once(empty_database_url):
     env = {**os.environ, "DATABASE_URL": empty_database_url}
 
