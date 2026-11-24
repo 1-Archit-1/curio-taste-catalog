@@ -51,6 +51,15 @@ class Job(Base):
                 "preset_id IS NOT NULL AND status IN ('queued', 'running', 'paused')"
             ),
         ),
+        # A user's Simkl grant has one live access token, so only one sync may be active.
+        Index(
+            "uq_jobs_active_simkl_sync",
+            "user_id",
+            unique=True,
+            postgresql_where=text(
+                "job_kind = 'simkl_sync' AND status IN ('queued', 'running', 'paused')"
+            ),
+        ),
         Index(
             "idx_jobs_claimable",
             "run_at",

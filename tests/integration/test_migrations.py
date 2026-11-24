@@ -184,6 +184,12 @@ def test_simkl_migration_constrains_new_values_and_downgrades_with_simkl_rows(
         )
         for kind in ("simkl_sync", "simkl_revoke", "regenerate"):
             conn.execute("INSERT INTO jobs (user_id, job_kind) VALUES (%s, %s)", (user_id, kind))
+        # One active Simkl sync per user, but any number of other jobs.
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            conn.execute(
+                "INSERT INTO jobs (user_id, job_kind) VALUES (%s, 'simkl_sync')", (user_id,)
+            )
+        conn.execute("INSERT INTO jobs (user_id, job_kind) VALUES (%s, 'simkl_revoke')", (user_id,))
         for key_type in ("simkl", "tmdb"):
             conn.execute(
                 "INSERT INTO key_decrypt_audit (user_id, key_type, reason) VALUES (%s, %s, 'test')",

@@ -20,6 +20,7 @@ from curio.db.models.jobs import Job
 from curio.db.models.simkl import SimklConnection, SimklOAuthState, SimklRevocation
 from curio.db.models.sources import Source, UserSource
 from curio.services import keys as keys_service
+from curio.services import simkl as simkl_service
 from curio.services.users import ProvisionedUser
 from tests.integration.lb_support import login
 from tests.integration.simkl_support import (
@@ -451,7 +452,11 @@ async def test_reconnecting_replaces_the_grant_revokes_the_old_one_and_clears_a_
         refresh=old_refresh,
         snapshot={"all": "2025-01-01T00:00:00Z"},
     )
-    # The old grant was rejected and its sync job is paused.
+    # The old grant was rejected and its queued sync job is paused.
+    async with audit_session_factory() as s:
+        paused_job = await simkl_service.request_sync(s, user_id=uid)
+        await s.commit()
+        paused_job_id = paused_job.id
     async with audit_session_factory() as s:
         await keys_service.pause_key_and_jobs(
             s,
@@ -482,8 +487,9 @@ async def test_reconnecting_replaces_the_grant_revokes_the_old_one_and_clears_a_
     by_kind = {j.job_kind: j for j in jobs}
     assert by_kind["simkl_revoke"].payload == {"revocation_id": str(revocation.id)}
     assert by_kind["simkl_revoke"].required_keys == []
-    assert by_kind["simkl_sync"].status == "queued"  # a sync is queued, and only one
-    assert len([j for j in jobs if j.job_kind == "simkl_sync"]) == 1
+    # The paused sync runs again; no second one is queued next to it.
+    syncs = [j for j in jobs if j.job_kind == "simkl_sync"]
+    assert [(j.id, j.status, j.paused_key_type) for j in syncs] == [(paused_job_id, "queued", None)]
     assert (await committed_client.get("/api/simkl/connection")).json()["needs_reconnect"] is False
 
 

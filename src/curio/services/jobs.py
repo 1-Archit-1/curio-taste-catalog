@@ -39,6 +39,7 @@ from curio.settings import Settings
 log = logging.getLogger(__name__)
 
 ACTIVE_JOB_CONSTRAINT = "uq_jobs_active_preset_kind"
+ACTIVE_SIMKL_SYNC_CONSTRAINT = "uq_jobs_active_simkl_sync"
 LEASE_LOST_MESSAGE = "Worker stopped responding."
 RETRY_BACKOFF_SECONDS = 10
 
@@ -326,8 +327,11 @@ async def enqueue_job(
             payload=payload,
         )
     except IntegrityError as exc:
-        if _violated_constraint(exc) == ACTIVE_JOB_CONSTRAINT:
+        violated = _violated_constraint(exc)
+        if violated == ACTIVE_JOB_CONSTRAINT:
             raise DuplicateJobError("an active job already exists for this preset") from exc
+        if violated == ACTIVE_SIMKL_SYNC_CONSTRAINT:
+            raise DuplicateJobError("a Simkl sync is already in progress") from exc
         raise
 
 

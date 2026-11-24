@@ -43,6 +43,16 @@ def upgrade() -> None:
     _swap_check("jobs", "jobs_job_kind_check", _NEW_JOB_KINDS)
     _swap_check("key_decrypt_audit", "key_decrypt_audit_key_type_check", _NEW_AUDIT_KEY_TYPES)
 
+    op.create_index(
+        "uq_jobs_active_simkl_sync",
+        "jobs",
+        ["user_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "job_kind = 'simkl_sync' AND status IN ('queued', 'running', 'paused')"
+        ),
+    )
+
     op.create_table(
         "simkl_oauth_states",
         sa.Column("state_hash", sa.Text(), nullable=False),
@@ -129,6 +139,7 @@ def downgrade() -> None:
     op.execute("DELETE FROM sources WHERE kind = 'simkl'")
     op.execute("DELETE FROM source_items WHERE item_kind IN ('watching', 'dropped')")
     op.execute("DELETE FROM jobs WHERE job_kind IN ('simkl_sync', 'simkl_revoke')")
+    op.drop_index("uq_jobs_active_simkl_sync", table_name="jobs")
     op.execute("DELETE FROM key_decrypt_audit WHERE key_type = 'simkl'")
     _swap_check("key_decrypt_audit", "key_decrypt_audit_key_type_check", _OLD_AUDIT_KEY_TYPES)
     _swap_check("jobs", "jobs_job_kind_check", _OLD_JOB_KINDS)

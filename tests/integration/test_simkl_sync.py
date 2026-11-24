@@ -20,6 +20,7 @@ from curio.db.models.simkl import SimklConnection
 from curio.db.models.sources import Source, SourceItem
 from curio.repositories import catalogs as catalogs_repo
 from curio.repositories import sources as sources_repo
+from curio.services import jobs as jobs_service
 from curio.services import sources as sources_service
 from curio.services.users import ProvisionedUser
 from tests.integration.lb_support import login
@@ -794,3 +795,20 @@ async def test_one_users_connection_is_invisible_to_another(
     # Alice's data is intact.
     assert (await env.client.get("/api/simkl/connection")).json()["connected"] is True
     assert len(await env.items()) == 9
+
+
+async def test_the_database_allows_one_active_sync_per_user(env: Env, simkl: SimklMock):
+    """Two requests racing past the `has_active_job` check can't both queue a sync."""
+    async with env.factory() as s:
+        await jobs_service.enqueue_job(s, user_id=env.uid, job_kind="simkl_sync")
+        await s.commit()
+    async with env.factory() as s:
+        with pytest.raises(jobs_service.DuplicateJobError, match="Simkl sync is already"):
+            await jobs_service.enqueue_job(s, user_id=env.uid, job_kind="simkl_sync")
+    # A finished sync doesn't block the next one.
+    async with env.factory() as s:
+        await s.execute(
+            text("UPDATE jobs SET status = 'succeeded' WHERE user_id = :u"), {"u": env.uid}
+        )
+        await jobs_service.enqueue_job(s, user_id=env.uid, job_kind="simkl_sync")
+        await s.commit()
