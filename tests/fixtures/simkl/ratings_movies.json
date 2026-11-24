@@ -1,0 +1,25 @@
+{
+  "movies": [
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "last_watched_at": "2025-02-02T09:00:00Z",
+      "movie": {
+        "ids": {
+          "imdb": "tt0133093",
+          "simkl": 10,
+          "slug": "the-matrix",
+          "tmdb": "603"
+        },
+        "poster": "00/00fakeposter",
+        "title": "The Matrix",
+        "year": 1999
+      },
+      "not_aired_episodes_count": 0,
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-07-02T10:00:00Z",
+      "user_rating": 10,
+      "watched_episodes_count": 0
+    }
+  ]
+}

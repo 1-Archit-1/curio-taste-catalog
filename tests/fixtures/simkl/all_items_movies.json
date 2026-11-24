@@ -1,0 +1,88 @@
+{
+  "movies": [
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "last_watched_at": "2025-02-02T09:00:00Z",
+      "movie": {
+        "ids": {
+          "imdb": "tt0133093",
+          "simkl": 10,
+          "slug": "the-matrix",
+          "tmdb": "603"
+        },
+        "poster": "00/00fakeposter",
+        "title": "The Matrix",
+        "year": 1999
+      },
+      "not_aired_episodes_count": 0,
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-02-02T10:00:00Z",
+      "user_rating": 9,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "last_watched_at": null,
+      "movie": {
+        "ids": {
+          "imdb": "tt0110912",
+          "simkl": 54130,
+          "slug": "pulp-fiction",
+          "tmdb": "680"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Pulp Fiction",
+        "year": 1994
+      },
+      "not_aired_episodes_count": 0,
+      "status": "dropped",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-03-02T10:00:00Z",
+      "user_rating": 5,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "last_watched_at": "1994-09-01T16:00:00Z",
+      "movie": {
+        "ids": {
+          "imdb": "tt0068646",
+          "simkl": 53434,
+          "slug": "the-godfather",
+          "tmdb": "238"
+        },
+        "poster": "00/00fakeposter",
+        "title": "The Godfather",
+        "year": 1972
+      },
+      "not_aired_episodes_count": 0,
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": null,
+      "user_rating": null,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "last_watched_at": null,
+      "movie": {
+        "ids": {
+          "imdb": "tt1160419",
+          "simkl": 11,
+          "slug": "dune",
+          "tmdb": "438631"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Dune",
+        "year": 2021
+      },
+      "not_aired_episodes_count": 0,
+      "status": "plantowatch",
+      "total_episodes_count": 0,
+      "user_rated_at": null,
+      "user_rating": null,
+      "watched_episodes_count": 0
+    }
+  ]
+}

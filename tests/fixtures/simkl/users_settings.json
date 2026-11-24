@@ -1,0 +1,16 @@
+{
+  "account": {
+    "id": 424242,
+    "timezone": "UTC",
+    "type": "free"
+  },
+  "user": {
+    "age": null,
+    "avatar": "https://example.invalid/avatar.jpg",
+    "bio": "",
+    "gender": "",
+    "joined_at": "2020-01-01T00:00:00Z",
+    "loc": "",
+    "name": "curio-fixture-user"
+  }
+}
