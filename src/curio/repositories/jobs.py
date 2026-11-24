@@ -211,8 +211,12 @@ async def finish_run(
     await session.execute(stmt)
 
 
+def _updated_count(result: Any) -> int:
+    return int(result.rowcount or 0)
+
+
 def _updated(result: Any) -> bool:
-    return int(result.rowcount or 0) > 0
+    return _updated_count(result) > 0
 
 
 async def fail_running_runs(
@@ -426,3 +430,17 @@ async def resume_user_jobs_for_key(
         .returning(Job.id)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def cancel_unstarted_jobs(session: AsyncSession, *, user_id: UUID, job_kind: str) -> int:
+    """Cancel the user's `queued` and `paused` jobs of one kind. A `running` job is left alone."""
+    stmt = (
+        update(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.job_kind == job_kind,
+            Job.status.in_(("queued", "paused")),
+        )
+        .values(status="cancelled", finished_at=func.now(), updated_at=func.now())
+    )
+    return _updated_count(await session.execute(stmt))

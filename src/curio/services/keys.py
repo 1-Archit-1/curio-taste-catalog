@@ -8,6 +8,7 @@ Follows ADR 0002:
   the caller's job transaction.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from curio.crypto import KeyDecryptor, KeyEncryptor, mask_last4
 from curio.db.models.keys import KeyDecryptAudit
 from curio.repositories import jobs as jobs_repo
 from curio.repositories import keys as keys_repo
+from curio.repositories import simkl as simkl_repo
 from curio.repositories import users as users_repo
 from curio.repositories.keys import ApiKeyMetadataRow
 
@@ -191,6 +193,40 @@ async def get_llm_key(
     return ResolvedLlmKey(provider=provider, api_key=plaintext)
 
 
+async def decrypt_simkl_secrets(
+    audit_session_factory: async_sessionmaker[AsyncSession],
+    *,
+    user_id: UUID,
+    job_id: str | None,
+    reason: str,
+    private_key: str | None,
+    ciphertexts: Sequence[bytes],
+) -> list[str]:
+    """Worker key access for Simkl tokens: decrypts sealed tokens and writes one audit row.
+
+    The ciphertexts come from `simkl_connections` or `simkl_revocations`. Like
+    `get_user_api_key`, the audit row is committed on its own session before any plaintext is
+    returned, so a later rollback can't erase the record.
+    """
+    decryptor = KeyDecryptor(private_key)
+    plaintexts = [decryptor.decrypt(ciphertext) for ciphertext in ciphertexts]
+    async with audit_session_factory() as audit_session:
+        await keys_repo.insert_decrypt_audit(
+            audit_session,
+            user_id=user_id,
+            key_type=KeyType.SIMKL.value,
+            job_id=job_id,
+            reason=reason,
+        )
+        await audit_session.commit()
+    return plaintexts
+
+
+def seal_in_worker(private_key: str | None, plaintext: str) -> bytes:
+    """Seal a refreshed token. Workers hold only the private key, which implies the public one."""
+    return KeyEncryptor(KeyDecryptor(private_key).public_key_b64).encrypt(plaintext)
+
+
 async def list_user_audit_entries(
     session: AsyncSession,
     *,
@@ -206,7 +242,7 @@ async def rotate_all_keys(
     old_private_key: str,
     new_public_key: str,
 ) -> int:
-    """Re-encrypt every stored user API key under a new public key inside one transaction.
+    """Re-encrypt every stored API key and Simkl token under a new public key, in one transaction.
 
     Each decryption is audited (reason `rotation`, no job) in the same transaction, so the audit
     rows commit or roll back together with the re-encryption.
@@ -232,7 +268,36 @@ async def rotate_all_keys(
                 job_id=None,
                 reason="rotation",
             )
-    return len(rows)
+        rotated = len(rows)
+        # Simkl tokens are sealed under the same keypair, so a rotation has to cover them.
+        for connection in await simkl_repo.lock_all_connections(session):
+            connection.access_token_ciphertext = encryptor.encrypt(
+                decryptor.decrypt(connection.access_token_ciphertext)
+            )
+            connection.refresh_token_ciphertext = encryptor.encrypt(
+                decryptor.decrypt(connection.refresh_token_ciphertext)
+            )
+            await keys_repo.insert_decrypt_audit(
+                session,
+                user_id=connection.user_id,
+                key_type=KeyType.SIMKL.value,
+                job_id=None,
+                reason="rotation",
+            )
+            rotated += 1
+        for revocation in await simkl_repo.lock_all_revocations(session):
+            revocation.refresh_token_ciphertext = encryptor.encrypt(
+                decryptor.decrypt(revocation.refresh_token_ciphertext)
+            )
+            await keys_repo.insert_decrypt_audit(
+                session,
+                user_id=revocation.user_id,
+                key_type=KeyType.SIMKL.value,
+                job_id=None,
+                reason="rotation",
+            )
+            rotated += 1
+    return rotated
 
 
 async def pause_key_and_jobs(
@@ -245,7 +310,17 @@ async def pause_key_and_jobs(
     """Pause `key_type` for `user_id`, pause its queued jobs, and update `jobs_paused_reason`.
 
     Jobs already `running` are not touched here; each pauses itself when it hits the key error.
+
+    Simkl has no `user_api_keys` row: its pause is `simkl_connections.needs_reconnect`, and it is
+    kept out of `users.jobs_paused_reason`, which reports keys the user can replace in Settings.
     """
+    if key_type is KeyType.SIMKL:
+        await simkl_repo.record_sync_failure(
+            session, user_id=user_id, error=reason, needs_reconnect=True
+        )
+        return await jobs_repo.pause_user_jobs_for_key(
+            session, user_id=user_id, key_type=key_type.value, reason=reason
+        )
     await keys_repo.set_key_paused(
         session,
         user_id=user_id,
@@ -270,7 +345,15 @@ async def resume_key_and_jobs(
     user_id: UUID,
     key_type: KeyType,
 ) -> list[UUID]:
-    """Clear pause on `key_type`, requeue jobs paused on it, and recompute `jobs_paused_reason`."""
+    """Clear pause on `key_type`, requeue jobs paused on it, and recompute `jobs_paused_reason`.
+
+    A new Simkl grant clears `needs_reconnect` itself when it is stored, so for Simkl this only
+    requeues the paused jobs.
+    """
+    if key_type is KeyType.SIMKL:
+        return await jobs_repo.resume_user_jobs_for_key(
+            session, user_id=user_id, key_type=key_type.value
+        )
     await keys_repo.set_key_paused(
         session,
         user_id=user_id,

@@ -7,14 +7,15 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from curio.db.models.catalogs import MediaItem, WatchHistory
 from curio.db.models.sources import ImportIssue, Source, SourceItem, SourceUpload, UserSource
 
-_WATCH_SIGNAL_KINDS = ("watched", "rating", "diary")
+# Items that say the user watched, is watching, or dropped a title. Simkl writes the last two.
+_WATCH_SIGNAL_KINDS = ("watched", "rating", "diary", "watching", "dropped")
 _SOURCE_UNIQUE_CONSTRAINT = "uq_sources_kind_owner_external_key"
 # Postgres allows 65535 bind parameters per statement; bulk inserts go in chunks well below it.
 _INSERT_CHUNK_ROWS = 1000
@@ -113,6 +114,12 @@ async def set_source_item_count(
 async def set_source_error(session: AsyncSession, *, source_id: UUID, error: str) -> None:
     await session.execute(
         update(Source).where(Source.id == source_id).values(last_error=error, updated_at=func.now())
+    )
+
+
+async def clear_source_error(session: AsyncSession, *, source_id: UUID) -> None:
+    await session.execute(
+        update(Source).where(Source.id == source_id).values(last_error=None, updated_at=func.now())
     )
 
 
@@ -253,10 +260,11 @@ async def list_self_user_ids_for_source(
     return list(rows)
 
 
-async def list_user_self_source_ids(session: AsyncSession, *, user_id: UUID) -> list[UUID]:
+async def list_user_self_sources(session: AsyncSession, *, user_id: UUID) -> list[Source]:
     """The user's `self` sources, oldest subscription first (the order precedence uses)."""
     rows = await session.scalars(
-        select(UserSource.source_id)
+        select(Source)
+        .join(UserSource, UserSource.source_id == Source.id)
         .where(UserSource.user_id == user_id, UserSource.role == "self")
         .order_by(UserSource.created_at.asc(), UserSource.source_id.asc())
     )
@@ -315,6 +323,34 @@ async def replace_source_items(
     """Make the source's items exactly `rows`: delete the others, upsert the rest."""
     await session.execute(delete(SourceItem).where(SourceItem.source_id == source_id))
     await upsert_source_items(session, rows)
+
+
+async def list_source_titles(session: AsyncSession, *, source_id: UUID) -> set[tuple[str, int]]:
+    """The distinct `(media_type, tmdb_id)` titles a source holds, whatever their item kinds."""
+    rows = await session.execute(
+        select(SourceItem.media_type, SourceItem.tmdb_id)
+        .where(SourceItem.source_id == source_id)
+        .distinct()
+    )
+    return {(row[0], row[1]) for row in rows.all()}
+
+
+async def delete_source_titles(
+    session: AsyncSession,
+    *,
+    source_id: UUID,
+    titles: Sequence[tuple[str, int]],
+) -> None:
+    """Delete every item of the given titles, whatever their item kinds."""
+    ordered = sorted(titles)
+    for start in range(0, len(ordered), _INSERT_CHUNK_ROWS):
+        chunk = ordered[start : start + _INSERT_CHUNK_ROWS]
+        await session.execute(
+            delete(SourceItem).where(
+                SourceItem.source_id == source_id,
+                tuple_(SourceItem.media_type, SourceItem.tmdb_id).in_(chunk),
+            )
+        )
 
 
 async def list_source_watch_signals(

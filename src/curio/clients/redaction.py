@@ -35,3 +35,23 @@ def install_log_redaction() -> None:
         httpx_logger.addFilter(RedactingFilter())
     # httpcore's DEBUG output includes raw request headers.
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+# The Simkl callback URL carries the one-time authorization `code` and the `state`.
+_OAUTH_CALLBACK_PARAM = re.compile(r"(?i)([?&])(code|state)=[^&\s\"']+")
+
+
+class AccessLogRedactingFilter(logging.Filter):
+    """Scrub OAuth callback parameters from uvicorn's access log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _OAUTH_CALLBACK_PARAM.sub(r"\1\2=[REDACTED]", record.getMessage())
+        record.args = None
+        return True
+
+
+def install_access_log_redaction() -> None:
+    """Idempotent. Call when the API is built."""
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, AccessLogRedactingFilter) for f in access_logger.filters):
+        access_logger.addFilter(AccessLogRedactingFilter())

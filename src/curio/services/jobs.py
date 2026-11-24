@@ -22,15 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from curio.clients.letterboxd import LetterboxdError
 from curio.clients.providers import KeyType
 from curio.clients.ratelimit import RateLimiter
+from curio.clients.simkl import SimklAuthError, SimklError
 from curio.clients.tmdb import TmdbAuthError, TmdbError, TmdbRateLimitError
 from curio.db.models.jobs import Job, Run, RunEvent
 from curio.repositories import catalogs as catalogs_repo
 from curio.repositories import jobs as jobs_repo
 from curio.repositories import keys as keys_repo
+from curio.repositories import simkl as simkl_repo
 from curio.repositories import sources as sources_repo
 from curio.services import keys as keys_service
+from curio.services import simkl_sync, starter
 from curio.services import sources as sources_service
-from curio.services import starter
 from curio.services.keys import KeyNotFoundError
 from curio.settings import Settings
 
@@ -46,6 +48,7 @@ _KEY_LABELS = {
     KeyType.OPENAI: "OpenAI",
     KeyType.ANTHROPIC: "Anthropic",
     KeyType.OPENROUTER: "OpenRouter",
+    KeyType.SIMKL: "Simkl",
 }
 
 
@@ -76,6 +79,10 @@ class KeyPausedError(Exception):
         self.key_type = key_type
         self.reason = reason
         label = _KEY_LABELS.get(key_type, key_type.value)
+        if key_type is KeyType.SIMKL:
+            # Simkl is a connection, not a key: there is nothing to replace in Settings.
+            super().__init__(f"Simkl connection paused: {reason}. Reconnect Simkl to resume.")
+            return
         super().__init__(
             f"{label} key paused: {reason}. Replace your {label} key in Settings to resume."
         )
@@ -96,6 +103,7 @@ USER_FACING_ERRORS: tuple[type[Exception], ...] = (
     KeyNotFoundError,
     KeyPausedError,
     PermanentJobError,
+    SimklError,
 )
 
 
@@ -112,6 +120,8 @@ def key_type_for_exception(exc: BaseException) -> KeyType | None:
         return exc.key_type
     if isinstance(exc, TmdbAuthError | TmdbRateLimitError):
         return KeyType.TMDB
+    if isinstance(exc, SimklAuthError):
+        return KeyType.SIMKL
     return None
 
 
@@ -187,6 +197,41 @@ async def _discard_import_upload(ctx: JobContext) -> None:
     )
 
 
+async def _run_simkl_sync(ctx: JobContext) -> None:
+    """Pull the user's Simkl library. A rejected grant pauses the job (`SimklAuthError`)."""
+    try:
+        await simkl_sync.run_sync_job(
+            ctx.session,
+            session_factory=ctx.session_factory,
+            settings=ctx.settings,
+            job=ctx.job,
+            emit_step=ctx.emit_step,
+        )
+    except SimklError as exc:
+        if exc.permanent:
+            raise PermanentJobError(str(exc)) from exc
+        raise
+
+
+async def _run_simkl_revoke(ctx: JobContext) -> None:
+    """Revoke a disconnected grant at Simkl and delete its sealed token."""
+    try:
+        await simkl_sync.run_revoke_job(
+            ctx.session,
+            session_factory=ctx.session_factory,
+            settings=ctx.settings,
+            job=ctx.job,
+            emit_step=ctx.emit_step,
+        )
+    except Exception as exc:
+        permanent = isinstance(exc, SimklError) and exc.permanent
+        if permanent or ctx.job.attempts >= ctx.job.max_attempts:
+            await simkl_sync.discard_revocation(ctx.session_factory, job=ctx.job)
+        if permanent:
+            raise PermanentJobError(str(exc)) from exc
+        raise
+
+
 # Registry of job kinds. To add one (for example `compile`):
 #   1. Write `async def handler(ctx: JobContext) -> None`. Use `ctx.session` for database work
 #      (commit when the work should survive a later failure), `ctx.emit_step(step, message,
@@ -211,6 +256,18 @@ JOB_REGISTRY: dict[str, JobSpec] = {
         required_keys=(KeyType.TMDB,),
         handler=_run_lb_import,
         success_message="Letterboxd export imported.",
+    ),
+    "simkl_sync": JobSpec(
+        pipeline="simkl_sync",
+        required_keys=(KeyType.SIMKL,),
+        handler=_run_simkl_sync,
+        success_message="Simkl synced.",
+    ),
+    "simkl_revoke": JobSpec(
+        pipeline="simkl_revoke",
+        required_keys=(),
+        handler=_run_simkl_revoke,
+        success_message="Simkl access revoked.",
     ),
 }
 
@@ -238,14 +295,24 @@ async def enqueue_job(
         if preset is None:
             raise PresetNotFoundError(f"preset {preset_id} not found")
     required_keys = [key.value for key in spec.required_keys]
-    metadata = {
-        row.key_type: row for row in await keys_repo.list_api_key_metadata(session, user_id=user_id)
+    # key type -> why it is paused (None when it is usable); absent when the user has none.
+    available: dict[str, str | None] = {
+        row.key_type: row.paused_reason
+        for row in await keys_repo.list_api_key_metadata(session, user_id=user_id)
     }
-    missing = [key for key in required_keys if key not in metadata]
+    if KeyType.SIMKL.value in required_keys:
+        connection = await simkl_repo.get_connection(session, user_id=user_id)
+        if connection is not None:
+            available[KeyType.SIMKL.value] = (
+                (connection.last_error or "Simkl needs to be reconnected")
+                if connection.needs_reconnect
+                else None
+            )
+    missing = [key for key in required_keys if key not in available]
     if missing:
         raise MissingRequiredKeysError(missing)
     for key in required_keys:
-        reason = metadata[key].paused_reason
+        reason = available[key]
         if reason:
             raise KeyPausedError(KeyType(key), reason)
     try:
