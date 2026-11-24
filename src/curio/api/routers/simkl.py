@@ -46,6 +46,7 @@ async def get_connection(
         last_synced_at=connection.last_synced_at if connection else None,
         last_error=connection.last_error if connection else None,
         needs_reconnect=connection.needs_reconnect if connection else False,
+        sync_job_id=result.sync_job.id if result.sync_job else None,
     )
 
 

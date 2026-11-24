@@ -21,3 +21,5 @@ class SimklStatusResponse(BaseModel):
     last_error: str | None = None
     # Simkl rejected the stored grant. Nothing syncs until the user connects again.
     needs_reconnect: bool = False
+    # The sync that is queued or running now, so the page can follow it (`GET /api/jobs/{id}`).
+    sync_job_id: UUID | None = None

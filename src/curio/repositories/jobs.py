@@ -67,6 +67,21 @@ async def has_active_job(session: AsyncSession, *, user_id: UUID, job_kind: str)
     return bool(await session.scalar(stmt))
 
 
+async def get_running_job(session: AsyncSession, *, user_id: UUID, job_kind: str) -> Job | None:
+    """The user's newest `queued` or `running` job of this kind. A paused one waits on the user."""
+    stmt = (
+        select(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.job_kind == job_kind,
+            Job.status.in_(("queued", "running")),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def get_latest_preset_job(
     session: AsyncSession,
     *,

@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { apiClient, extractErrorDetail } from "../api/client";
 import type { components } from "../api/schema";
+import { SimklCard } from "./SimklCard";
 import styles from "./SourcesPage.module.css";
 
 type SourceOut = components["schemas"]["SourceOut"];
@@ -20,6 +21,7 @@ const KIND_LABELS: Record<SourceOut["kind"], string> = {
   lb_diary_rss: "Diary RSS",
   lb_profile_csv: "Profile ZIP",
   lb_list_csv: "List CSV",
+  simkl: "Simkl",
 };
 
 /** How often the page asks for an import job's status. */
@@ -113,6 +115,9 @@ export function SourcesPage() {
   }, []);
 
   useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+  const reloadSources = useCallback(() => {
     void loadAll();
   }, [loadAll]);
 
@@ -379,6 +384,7 @@ export function SourcesPage() {
         </div>
       )}
 
+      <SimklCard onNotice={setNotice} onChanged={reloadSources} />
       <section className="card">
         <h2>Add Letterboxd RSS Source</h2>
         <p className="subtitle">
@@ -525,7 +531,9 @@ export function SourcesPage() {
                     <span>
                       {src.kind === "lb_diary_rss"
                         ? "Refreshed: "
-                        : "Imported: "}
+                        : src.kind === "simkl"
+                          ? "Synced: "
+                          : "Imported: "}
                       {formatDate(src.last_refreshed_at)}
                     </span>
                   </div>
@@ -535,23 +543,28 @@ export function SourcesPage() {
                 </div>
 
                 <div className={styles.sourceActions}>
-                  <select
-                    aria-label={`Role for ${src.label}`}
-                    value={src.role}
-                    disabled={busySourceId === src.id}
-                    onChange={(e) =>
-                      void handleRoleChange(
-                        src.id,
-                        e.target.value as SourceRole,
-                      )
-                    }
-                  >
-                    {ROLE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                  {src.kind === "simkl" ? (
+                    // A Simkl account is always the user's own history.
+                    <span className={styles.kindBadge}>Self (my history)</span>
+                  ) : (
+                    <select
+                      aria-label={`Role for ${src.label}`}
+                      value={src.role}
+                      disabled={busySourceId === src.id}
+                      onChange={(e) =>
+                        void handleRoleChange(
+                          src.id,
+                          e.target.value as SourceRole,
+                        )
+                      }
+                    >
+                      {ROLE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {src.kind === "lb_diary_rss" && (
                     <button
                       type="button"
@@ -562,14 +575,16 @@ export function SourcesPage() {
                       Refresh
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-danger"
-                    disabled={busySourceId === src.id}
-                    onClick={() => void handleRemove(src.id)}
-                  >
-                    Remove
-                  </button>
+                  {src.kind !== "simkl" && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      disabled={busySourceId === src.id}
+                      onClick={() => void handleRemove(src.id)}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

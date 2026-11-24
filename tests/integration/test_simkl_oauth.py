@@ -241,6 +241,7 @@ async def test_successful_callback_stores_sealed_tokens_and_queues_a_sync(
         "last_synced_at": None,
         "last_error": None,
         "needs_reconnect": False,
+        "sync_job_id": str(jobs[0].id),  # the sync queued by connecting
     }
     listed = (await committed_client.get("/api/sources")).json()["sources"]
     assert [(s["kind"], s["role"]) for s in listed] == [("simkl", "self")]

@@ -85,12 +85,14 @@ def _make_client(settings: Settings) -> SimklClient:
 class SimklStatus:
     configured: bool
     connection: SimklConnection | None
+    sync_job: Job | None
 
 
 async def get_status(session: AsyncSession, *, user_id: UUID, settings: Settings) -> SimklStatus:
     return SimklStatus(
         configured=settings.simkl_oauth_configured,
         connection=await simkl_repo.get_connection(session, user_id=user_id),
+        sync_job=await jobs_repo.get_running_job(session, user_id=user_id, job_kind="simkl_sync"),
     )
 
 

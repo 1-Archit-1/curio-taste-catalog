@@ -58,6 +58,8 @@ const PROVIDER_DISPLAY_NAMES: Record<KeyType, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
   openrouter: "OpenRouter",
+  // Shown in the decrypt audit: the worker opened a Simkl token. It has no key field here.
+  simkl: "Simkl",
 };
 
 function formatUtcTimestamp(iso: string): string {
