@@ -1,6 +1,6 @@
 # 3. Typed sources
 
-Status: Accepted
+Status: Accepted. "Sources are shared across users" is amended by [ADR 0009](0009-source-ownership-and-history-provenance.md): only public sources are shared.
 
 ## Context
 
