@@ -1,4 +1,4 @@
-"""Typed taste source, source-item, and import-issue models (ADR 0003 & ADR 0004)."""
+"""Typed taste source, source-item, upload, and import-issue models (ADR 0003, 0004, 0009)."""
 
 from datetime import datetime
 from typing import Any
@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     Uuid,
@@ -23,25 +24,41 @@ from sqlalchemy.orm import Mapped, mapped_column
 from curio.db.models import Base
 
 _SOURCE_KIND_CHECK = "kind IN ('lb_diary_rss', 'lb_profile_csv', 'lb_list_csv')"
+# Public kinds are shared and have no owner; every other kind belongs to the user who uploaded it.
+_SOURCE_OWNER_CHECK = "(kind = 'lb_diary_rss') = (owner_user_id IS NULL)"
 _USER_SOURCE_ROLE_CHECK = "role IN ('self', 'taste', 'candidates')"
 _ITEM_KIND_CHECK = "item_kind IN ('watched', 'rating', 'diary', 'watchlist', 'list')"
 _MEDIA_TYPE_CHECK = "media_type IN ('movie', 'series')"
 _ISSUE_STATUS_CHECK = "status IN ('pending', 'resolved', 'dismissed')"
+# Ratings use Curio's 0-10 scale (Letterboxd stars x 2) in every table.
+_RATING_CHECK = "rating IS NULL OR (rating >= 0 AND rating <= 10)"
 
 
 class Source(Base):
-    """Shared taste source across users (no user_id)."""
+    """Taste source. Public kinds are shared; export kinds belong to `owner_user_id` (ADR 0009)."""
 
     __tablename__ = "sources"
     __table_args__ = (
         CheckConstraint(_SOURCE_KIND_CHECK, name="sources_kind_check"),
-        UniqueConstraint("kind", "external_key", name="uq_sources_kind_external_key"),
+        CheckConstraint(_SOURCE_OWNER_CHECK, name="sources_owner_kind_check"),
+        UniqueConstraint(
+            "kind",
+            "owner_user_id",
+            "external_key",
+            name="uq_sources_kind_owner_external_key",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         Uuid,
         primary_key=True,
         server_default=text("gen_random_uuid()"),
+    )
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     external_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -52,6 +69,8 @@ class Source(Base):
         DateTime(timezone=True), nullable=True
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When the poller may fetch this public source next. NULL means as soon as possible.
+    next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
@@ -103,10 +122,7 @@ class SourceItem(Base):
     __table_args__ = (
         CheckConstraint(_MEDIA_TYPE_CHECK, name="source_items_media_type_check"),
         CheckConstraint(_ITEM_KIND_CHECK, name="source_items_item_kind_check"),
-        CheckConstraint(
-            "rating IS NULL OR (rating >= 0 AND rating <= 10)",
-            name="source_items_rating_check",
-        ),
+        CheckConstraint(_RATING_CHECK, name="source_items_rating_check"),
         ForeignKeyConstraint(
             ["media_type", "tmdb_id"],
             ["media_items.media_type", "media_items.tmdb_id"],
@@ -145,6 +161,7 @@ class ImportIssue(Base):
     __table_args__ = (
         CheckConstraint(_ITEM_KIND_CHECK, name="import_issues_item_kind_check"),
         CheckConstraint(_ISSUE_STATUS_CHECK, name="import_issues_status_check"),
+        CheckConstraint(_RATING_CHECK, name="import_issues_rating_check"),
         CheckConstraint(
             "resolved_media_type IS NULL OR resolved_media_type IN ('movie', 'series')",
             name="import_issues_resolved_media_type_check",
@@ -193,6 +210,32 @@ class ImportIssue(Base):
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+        nullable=False,
+    )
+
+
+class SourceUpload(Base):
+    """An uploaded export ZIP waiting for its `lb_import` job. Deleted when the job ends."""
+
+    __tablename__ = "source_uploads"
+    __table_args__ = (Index("idx_source_uploads_user_id", "user_id"),)
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
         nullable=False,

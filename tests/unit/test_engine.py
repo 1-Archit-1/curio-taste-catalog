@@ -48,6 +48,7 @@ def test_models_register_all_expected_tables():
         "user_sources",
         "source_items",
         "import_issues",
+        "source_uploads",
     }
 
 

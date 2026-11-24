@@ -1,4 +1,4 @@
-"""Typed taste sources, source items, and import issues.
+"""Typed taste sources, source items, uploads, import issues, and watch history provenance.
 
 Revision ID: 0005
 Revises: 0004
@@ -21,6 +21,7 @@ def upgrade() -> None:
     op.create_table(
         "sources",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column("owner_user_id", sa.Uuid(), nullable=True),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("external_key", sa.Text(), nullable=False),
         sa.Column("label", sa.Text(), nullable=False),
@@ -28,6 +29,7 @@ def upgrade() -> None:
         sa.Column("item_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("last_refreshed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("next_refresh_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -44,8 +46,19 @@ def upgrade() -> None:
             "kind IN ('lb_diary_rss', 'lb_profile_csv', 'lb_list_csv')",
             name="sources_kind_check",
         ),
+        sa.CheckConstraint(
+            "(kind = 'lb_diary_rss') = (owner_user_id IS NULL)",
+            name="sources_owner_kind_check",
+        ),
+        sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("kind", "external_key", name="uq_sources_kind_external_key"),
+        sa.UniqueConstraint(
+            "kind",
+            "owner_user_id",
+            "external_key",
+            name="uq_sources_kind_owner_external_key",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     op.create_table(
@@ -159,6 +172,10 @@ def upgrade() -> None:
             name="import_issues_status_check",
         ),
         sa.CheckConstraint(
+            "rating IS NULL OR (rating >= 0 AND rating <= 10)",
+            name="import_issues_rating_check",
+        ),
+        sa.CheckConstraint(
             "resolved_media_type IS NULL OR resolved_media_type IN ('movie', 'series')",
             name="import_issues_resolved_media_type_check",
         ),
@@ -172,9 +189,58 @@ def upgrade() -> None:
     op.create_index(
         "idx_import_issues_user_source", "import_issues", ["user_id", "source_id"], unique=False
     )
+    op.create_table(
+        "source_uploads",
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("filename", sa.Text(), nullable=False),
+        sa.Column("data", sa.LargeBinary(), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("idx_source_uploads_user_id", "source_uploads", ["user_id"], unique=False)
+    # Rows a source wrote carry its id, so they go away with it (ADR 0009).
+    op.add_column("watch_history", sa.Column("source_id", sa.Uuid(), nullable=True))
+    op.create_foreign_key(
+        "watch_history_source_id_fkey",
+        "watch_history",
+        "sources",
+        ["source_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_index(
+        "idx_watch_history_source_id",
+        "watch_history",
+        ["source_id"],
+        unique=False,
+        postgresql_where=sa.text("source_id IS NOT NULL"),
+    )
+    op.drop_constraint("jobs_job_kind_check", "jobs", type_="check")
+    op.create_check_constraint(
+        "jobs_job_kind_check", "jobs", "job_kind IN ('regenerate', 'compile', 'lb_import')"
+    )
 
 
 def downgrade() -> None:
+    # `lb_import` jobs would violate the restored constraint; their uploads go with the table.
+    op.execute("DELETE FROM jobs WHERE job_kind = 'lb_import'")
+    op.drop_constraint("jobs_job_kind_check", "jobs", type_="check")
+    op.create_check_constraint(
+        "jobs_job_kind_check", "jobs", "job_kind IN ('regenerate', 'compile')"
+    )
+    op.drop_index("idx_watch_history_source_id", table_name="watch_history")
+    op.drop_constraint("watch_history_source_id_fkey", "watch_history", type_="foreignkey")
+    op.drop_column("watch_history", "source_id")
+    op.drop_index("idx_source_uploads_user_id", table_name="source_uploads")
+    op.drop_table("source_uploads")
     op.drop_index("idx_import_issues_user_source", table_name="import_issues")
     op.drop_index("idx_import_issues_user_status", table_name="import_issues")
     op.drop_table("import_issues")

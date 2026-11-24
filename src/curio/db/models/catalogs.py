@@ -213,6 +213,11 @@ class WatchHistory(Base):
             ondelete="CASCADE",
             name="fk_watch_history_media_item",
         ),
+        Index(
+            "idx_watch_history_source_id",
+            "source_id",
+            postgresql_where=text("source_id IS NOT NULL"),
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(
@@ -226,6 +231,12 @@ class WatchHistory(Base):
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     watched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+    # The `sources` row that wrote this row. NULL means manual or another origin (ADR 0009).
+    source_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("sources.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=text("now()"),
