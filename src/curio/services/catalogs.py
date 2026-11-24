@@ -1,5 +1,6 @@
 """Catalog, preset, slot, veto, and Stremio addon protocol business logic."""
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from urllib.parse import unquote
@@ -285,13 +286,27 @@ async def record_served_titles_best_effort(
     *,
     user_id: UUID,
     items: Sequence[tuple[UUID, str, int]],
+    timeout_seconds: float = 2.0,
 ) -> None:
-    """Persist served-title counts on a fresh session, logging and swallowing errors."""
+    """Persist served-title counts on a fresh session, logging and dropping any failure.
+
+    The write is abandoned after `timeout_seconds` so a slow database cannot hold up requests.
+    """
     if not items:
         return
-    try:
+
+    async def write() -> None:
         async with session_factory() as session:
             await catalogs_repo.record_served_titles(session, user_id=user_id, items=items)
             await session.commit()
+
+    try:
+        await asyncio.wait_for(write(), timeout=timeout_seconds)
+    except TimeoutError:
+        log.warning(
+            "timed out after %.1fs recording served titles for user %s; dropped",
+            timeout_seconds,
+            user_id,
+        )
     except Exception:
         log.warning("failed to record served titles for user %s", user_id, exc_info=True)

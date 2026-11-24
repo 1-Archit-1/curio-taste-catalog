@@ -165,6 +165,7 @@ async def _serve_catalog(
             session_factory,
             user_id=user.id,
             items=[(i.preset_id, i.media_type, i.tmdb_id) for i in items],
+            timeout_seconds=settings.served_titles_timeout_seconds,
         )
     return JSONResponse({"metas": metas}, headers=_NO_CACHE_HEADERS)
 
