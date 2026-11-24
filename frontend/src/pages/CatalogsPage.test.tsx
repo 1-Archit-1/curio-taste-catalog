@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +29,8 @@ function vetoTitle(pathname: string): ["movie" | "series", number] {
   return [mediaType as "movie" | "series", Number(tmdbId)];
 }
 
+const PRESET_ID = "11111111-1111-1111-1111-111111111111";
+
 function renderCatalogsApp() {
   return render(
     <MemoryRouter initialEntries={["/catalogs"]}>
@@ -42,9 +50,34 @@ describe("CatalogsPage", () => {
   });
 
   afterEach(() => {
+    // Unmount first: otherwise the page can issue a request after `fetch` is unstubbed, which
+    // escapes the mock and hits the real network.
+    cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  /** Resolve once the page has issued a request to `pathname`. */
+  async function waitForRequest(pathname: string, method = "GET") {
+    await waitFor(() => {
+      const issued = fetchMock.mock.calls.some(([input, init]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof Request
+              ? input.url
+              : String(input);
+        const requestMethod = (
+          init?.method ?? (input instanceof Request ? input.method : "GET")
+        ).toUpperCase();
+        return (
+          new URL(url, "http://localhost").pathname === pathname &&
+          requestMethod === method
+        );
+      });
+      expect(issued).toBe(true);
+    });
+  }
 
   it("supports slot assignment, preset create/edit/delete, and candidate Seen / Not for me / Undo", async () => {
     const user = userEvent.setup();
@@ -476,7 +509,7 @@ describe("CatalogsPage", () => {
     tmdbPausedReason?: string | null;
     onRegenerate?: () => Response;
   }) {
-    const presetId = "11111111-1111-1111-1111-111111111111";
+    const presetId = PRESET_ID;
     fetchMock.mockImplementation(async (input, init) => {
       const url =
         typeof input === "string"
@@ -581,8 +614,10 @@ describe("CatalogsPage", () => {
     const btn = await screen.findByRole("button", { name: "Regenerate" });
     expect(btn).toBeDisabled();
     expect(
-      screen.getByText("Add a TMDB API key in Settings to regenerate."),
+      await screen.findByText("Add a TMDB API key in Settings to regenerate."),
     ).toBeInTheDocument();
+    await waitForRequest(`/api/presets/${PRESET_ID}/candidates`);
+    await waitForRequest(`/api/presets/${PRESET_ID}/jobs/latest`);
   });
 
   it("disables Regenerate and shows alert when TMDB key is paused", async () => {
@@ -594,9 +629,32 @@ describe("CatalogsPage", () => {
 
     const btn = await screen.findByRole("button", { name: "Regenerate" });
     expect(btn).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    expect(await screen.findByRole("alert")).toHaveTextContent(
       "TMDB key paused: TMDB rejected key (401). Replace your TMDB key in Settings to resume.",
     );
+    await waitForRequest(`/api/presets/${PRESET_ID}/candidates`);
+    await waitForRequest(`/api/presets/${PRESET_ID}/jobs/latest`);
+  });
+
+  it("shows the key-paused detail when Regenerate is rejected with 409", async () => {
+    const user = userEvent.setup();
+    const detail =
+      "TMDB key paused: TMDB rejected the API key. Replace your TMDB key in Settings to resume.";
+    // Settings still say the key is fine (the pause happened after they were loaded).
+    setupBasicCatalogMocks({
+      tmdbConfigured: true,
+      onRegenerate: () => jsonResponse({ status: 409, body: { detail } }),
+    });
+    renderCatalogsApp();
+
+    const btn = await screen.findByRole("button", { name: "Regenerate" });
+    await waitFor(() => expect(btn).toBeEnabled());
+    await user.click(btn);
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Regenerating..." }),
+    ).not.toBeInTheDocument();
   });
 
   it("calls POST /api/presets/{id}/regenerate when TMDB key is configured", async () => {
@@ -636,6 +694,6 @@ describe("CatalogsPage", () => {
     expect(
       await screen.findByRole("button", { name: "Regenerating..." }),
     ).toBeDisabled();
-    expect(screen.getByText("queued")).toBeInTheDocument();
+    expect(await screen.findByText("queued")).toBeInTheDocument();
   });
 });

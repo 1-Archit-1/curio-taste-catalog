@@ -84,10 +84,15 @@ export interface paths {
         };
         /**
          * Stream Job Events
-         * @description Stream live job progress over SSE using Postgres LISTEN/NOTIFY.
+         * @description Stream live job progress over SSE.
          *
-         *     Replays any already-committed `run_events` first so steps emitted before the
-         *     browser connected are never lost, then wakes on `NOTIFY` until the job ends.
+         *     Replays committed `run_events` after `Last-Event-ID` (or from the start), then waits for
+         *     wake-ups from the API process's shared `job_events` listener until the job ends. Steps carry
+         *     their event id, so a reconnecting `EventSource` resumes where it stopped. A stream ends after
+         *     `sse_max_stream_seconds`; the browser then reconnects.
+         *
+         *     This route holds no database session while streaming. Authentication and the job lookup use
+         *     one short-lived session, and every wake-up reads on another.
          */
         get: operations["stream_job_events_api_jobs__job_id__events_get"];
         put?: never;
@@ -182,7 +187,10 @@ export interface paths {
         put?: never;
         /**
          * Regenerate Preset
-         * @description Enqueue a background `regenerate` job for the preset (409 if one is already active).
+         * @description Queue a background `regenerate` job for the preset.
+         *
+         *     Returns 202 once the job is committed. 409 if one is already active or a required key is
+         *     paused.
          */
         post: operations["regenerate_preset_api_presets__preset_id__regenerate_post"];
         delete?: never;
@@ -1058,7 +1066,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

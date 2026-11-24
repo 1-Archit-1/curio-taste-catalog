@@ -296,7 +296,8 @@ export function SettingsPage() {
     <section aria-label="Settings">
       {settings.jobs_paused_reason && (
         <div className="notice notice-err" role="alert">
-          <strong>Background runs paused:</strong> {settings.jobs_paused_reason}
+          <strong>Some background runs are paused:</strong>{" "}
+          {settings.jobs_paused_reason}
         </div>
       )}
 
