@@ -35,6 +35,9 @@ from curio.settings import Settings
 
 MediaKey = tuple[str, int]
 HYDRATE_CONCURRENCY = 8
+# Extra candidates hydrated per chunk beyond what is still needed, to cover titles that turn out
+# to have no IMDb ID and so can't be served.
+HYDRATE_BUFFER = 3
 
 log = logging.getLogger(__name__)
 
@@ -273,7 +276,9 @@ async def collect_unexcluded_titles(
 
     Stops early on an empty page or at `settings.tmdb_max_pages`. Excluded and duplicate refs are
     skipped before hydration so we don't spend TMDB detail calls on titles the user already saw
-    or vetoed.
+    or vetoed. Each page is hydrated in chunks of the number of items still needed plus
+    `HYDRATE_BUFFER`, stopping as soon as `limit` is reached, so the tail of a page is not
+    hydrated when it isn't needed.
     """
     if limit <= 0:
         return []
@@ -290,14 +295,16 @@ async def collect_unexcluded_titles(
                 continue
             seen_keys.add(key)
             candidate_refs.append(ref)
-        if not candidate_refs:
-            continue
-        hydrated = await hydrate_titles(session, client, candidate_refs, settings=settings)
-        for item in hydrated:
-            if item.imdb_id:
-                collected.append(item)
-                if len(collected) >= limit:
-                    return collected
+        position = 0
+        while position < len(candidate_refs):
+            chunk_size = limit - len(collected) + HYDRATE_BUFFER
+            chunk = candidate_refs[position : position + chunk_size]
+            position += len(chunk)
+            for item in await hydrate_titles(session, client, chunk, settings=settings):
+                if item.imdb_id:
+                    collected.append(item)
+                    if len(collected) >= limit:
+                        return collected
     return collected
 
 

@@ -499,7 +499,8 @@ async def test_discover_unexcluded_walks_pages_skips_excluded_and_stops_at_limit
     assert [i.tmdb_id for i in items] == [1836957, 87101]
     assert discover_route.call_count == 2
     assert tmdb_routes["movie_603"].call_count == 0  # excluded before hydration
-    assert tmdb_routes["movie_777443"].call_count == 1  # hydrated on page 2, limit sliced to 2
+    # Page 2 needs 1 more item, so its chunk is 1 + HYDRATE_BUFFER and covers both titles.
+    assert tmdb_routes["movie_777443"].call_count == 1
 
 
 async def test_page_walking_stops_at_max_pages_or_empty_page(
@@ -649,6 +650,43 @@ async def test_stale_title_that_now_404s_keeps_cached_row_and_is_not_refetched(
     )
     assert [i.name for i in again] == ["Old Matrix"]
     assert route.call_count == 1
+
+
+async def test_collect_hydrates_only_remaining_plus_buffer_per_page(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    ids = [603, 87101, 777443, 1836957, 1836920, 647763, 4917]
+    page1 = {"results": [{"id": i, "title": f"T{i}", "release_date": "2000-01-01"} for i in ids]}
+    route = respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        return_value=httpx.Response(200, json=page1)
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=1, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in items] == [603]
+    assert route.call_count == 1  # no second page needed
+    hydrated = {name for name, r in tmdb_routes.items() if r.call_count and name != "discover"}
+    # 1 needed + HYDRATE_BUFFER (3) candidates, and nothing from the tail of the page.
+    assert hydrated == {"movie_603", "movie_87101", "movie_777443", "movie_1836957"}
+
+
+async def test_collect_moves_to_the_next_chunk_when_a_chunk_has_nothing_servable(
+    session, tmdb, tmdb_routes, respx_mock, monkeypatch
+):
+    monkeypatch.setattr(media_service, "HYDRATE_BUFFER", 0)
+    # 1836920 and 647763 have no IMDb ID, so chunks of 1 are hydrated until 603 is found.
+    ids = [1836920, 647763, 603, 87101]
+    page = {"results": [{"id": i, "title": f"T{i}", "release_date": "2000-01-01"} for i in ids]}
+    respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        return_value=httpx.Response(200, json=page)
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=1, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in items] == [603]
+    counts = {n: tmdb_routes[n].call_count for n in ("movie_1836920", "movie_647763", "movie_603")}
+    assert counts == {"movie_1836920": 1, "movie_647763": 1, "movie_603": 1}
+    assert tmdb_routes["movie_87101"].call_count == 0
 
 
 _EMBEDDING_FIELDS = dict(
