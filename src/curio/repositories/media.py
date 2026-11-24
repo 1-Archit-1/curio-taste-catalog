@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import case, func, null, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,11 @@ from curio.db.models.catalogs import MediaItem
 MediaKey = tuple[str, int]
 
 log = logging.getLogger(__name__)
+
+
+# `MediaItem` columns that `services.media.embedding_text` is built from. A refresh that changes
+# any of them invalidates the stored embedding; keep this in step with that function.
+EMBEDDING_INPUT_COLUMNS = ("name", "year", "genres", "keywords", "directors", "description")
 
 
 async def get_hydrated(
@@ -112,10 +117,21 @@ async def upsert_hydrated(
     }
 
     async def run(row_values: dict) -> MediaItem:
+        insert = pg_insert(MediaItem).values(media_type=media_type, tmdb_id=tmdb_id, **row_values)
+        # A refresh keeps the stored embedding unless something the embedding is built from
+        # changed. `IS DISTINCT FROM` compares NULLs and arrays the way we want.
+        inputs_changed = or_(
+            *(
+                getattr(MediaItem, col).is_distinct_from(getattr(insert.excluded, col))
+                for col in EMBEDDING_INPUT_COLUMNS
+            )
+        )
+        embedding = case((inputs_changed, null()), else_=MediaItem.embedding)
         stmt = (
-            pg_insert(MediaItem)
-            .values(media_type=media_type, tmdb_id=tmdb_id, **row_values)
-            .on_conflict_do_update(index_elements=["media_type", "tmdb_id"], set_=row_values)
+            insert.on_conflict_do_update(
+                index_elements=["media_type", "tmdb_id"],
+                set_={**row_values, "embedding": embedding},
+            )
             .returning(MediaItem)
             .execution_options(populate_existing=True)
         )

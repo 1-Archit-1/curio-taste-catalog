@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from curio.clients.embeddings import BASE_URL as GEMINI_URL
 from curio.clients.embeddings import EMBEDDING_DIMENSIONS, EmbeddingError, GeminiEmbedder
@@ -649,3 +649,123 @@ async def test_stale_title_that_now_404s_keeps_cached_row_and_is_not_refetched(
     )
     assert [i.name for i in again] == ["Old Matrix"]
     assert route.call_count == 1
+
+
+_EMBEDDING_FIELDS = dict(
+    media_type="movie",
+    tmdb_id=603,
+    imdb_id="tt0133093",
+    name="The Matrix",
+    year=1999,
+    description="A hacker.",
+    rating=8.3,
+    poster_path=None,
+    poster_url=None,
+    genres=["Action"],
+    keywords=["dystopia"],
+    cast_names=["Keanu Reeves"],
+    directors=["Lana Wachowski"],
+    genre_ids=[28],
+    keyword_ids=[4565],
+    vote_count=100,
+    popularity=1.5,
+    original_language="en",
+    runtime=120,
+    release_date=date(1999, 3, 31),
+    collection_id=None,
+    collection_name=None,
+)
+_CHANGED = {
+    "name": "The Matrix Reloaded",
+    "year": 2003,
+    "description": "A hacker, again.",
+    "genres": ["Action", "Science Fiction"],
+    "keywords": ["dystopia", "simulation"],
+    "directors": ["Lana Wachowski", "Lilly Wachowski"],
+}
+
+
+async def _stored_embedding(session, **overrides):
+    await media_repo.upsert_hydrated(session, **_EMBEDDING_FIELDS)
+    await media_repo.set_embedding(
+        session, media_type="movie", tmdb_id=603, embedding=[0.5] * EMBEDDING_DIMENSIONS
+    )
+    item = await media_repo.upsert_hydrated(session, **{**_EMBEDDING_FIELDS, **overrides})
+    await session.refresh(item)
+    return item
+
+
+async def test_refresh_with_unchanged_embedding_inputs_keeps_the_vector(session):
+    item = await _stored_embedding(
+        session,
+        # Fields the embedding does not use may change.
+        rating=7.0,
+        vote_count=500,
+        cast_names=["Someone Else"],
+        genre_ids=[28, 878],
+        keyword_ids=[4565, 1],
+    )
+    assert item.embedding is not None and item.embedding[0] == 0.5
+    assert item.vote_count == 500
+
+
+@pytest.mark.parametrize("column", sorted(_CHANGED))
+async def test_refresh_clears_the_vector_when_an_embedding_input_changed(session, column):
+    item = await _stored_embedding(session, **{column: _CHANGED[column]})
+    assert item.embedding is None
+    assert getattr(item, column) == _CHANGED[column]
+
+
+async def test_refresh_clears_the_vector_when_an_input_becomes_null(session):
+    item = await _stored_embedding(session, description=None)
+    assert item.embedding is None
+
+
+def test_embedding_input_columns_match_embedding_text():
+    def make(**overrides):
+        fields = {
+            "name": "N",
+            "year": 2000,
+            "description": "D",
+            "genres": ["G"],
+            "keywords": ["K"],
+            "directors": ["R"],
+            "cast_names": ["C"],
+        }
+        return MediaItem(media_type="movie", tmdb_id=1, **{**fields, **overrides})
+
+    base_text = media_service.embedding_text(make())
+    assert set(_CHANGED) == set(media_repo.EMBEDDING_INPUT_COLUMNS)
+    for column, value in _CHANGED.items():
+        assert media_service.embedding_text(make(**{column: value})) != base_text, column
+    assert media_service.embedding_text(make(cast_names=["Other"])) == base_text
+
+
+async def test_stale_refresh_keeps_embedding_when_tmdb_data_is_unchanged(session, tmdb, respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(
+        return_value=httpx.Response(200, json=load("movie_603.json"))
+    )
+    [item] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await media_repo.set_embedding(
+        session, media_type="movie", tmdb_id=603, embedding=[0.25] * EMBEDDING_DIMENSIONS
+    )
+    await session.execute(update(MediaItem).values(hydrated_at=_age(8)))
+    [refreshed] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await session.refresh(refreshed)
+    assert route.call_count == 2
+    assert refreshed.embedding is not None and refreshed.embedding[0] == 0.25
+    # TMDB now reports different keywords: the vector is dropped so it is re-embedded.
+    changed = load("movie_603.json")
+    changed["keywords"]["keywords"] = changed["keywords"]["keywords"][:2]
+    route.mock(return_value=httpx.Response(200, json=changed))
+    await session.execute(update(MediaItem).values(hydrated_at=_age(8)))
+    [refreshed] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await session.refresh(refreshed)
+    assert refreshed.embedding is None
+    assert len(refreshed.keywords) == 2
