@@ -221,14 +221,16 @@ async def set_key_paused(
     key_type: str,
     reason: str | None,
 ) -> None:
-    """Pause or resume a user's API key by updating `paused_reason` and `paused_at`."""
+    """Pause or resume a user's API key by updating `paused_reason` and `paused_at`.
+
+    `updated_at` is left alone: it records when the key was last replaced.
+    """
     stmt = (
         update(UserApiKey)
         .where(UserApiKey.user_id == user_id, UserApiKey.key_type == key_type)
         .values(
             paused_reason=reason,
             paused_at=func.now() if reason is not None else None,
-            updated_at=func.now(),
         )
     )
     await session.execute(stmt)

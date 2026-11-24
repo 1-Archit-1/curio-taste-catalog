@@ -19,6 +19,12 @@ from curio.settings import Settings
 
 log = logging.getLogger(__name__)
 
+_DATABASE_ERRORS = (
+    psycopg.OperationalError,
+    SQLAlchemyOperationalError,
+    SQLAlchemyTimeoutError,
+)
+
 
 async def run(settings: Settings, stop: asyncio.Event) -> None:
     """Poll and process queued jobs until `stop` is set."""
@@ -40,19 +46,23 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
                     last_heartbeat = now
 
                 while not stop.is_set():
-                    processed = await jobs_service.process_one_job(
-                        session_factory,
-                        settings=settings,
-                        rate_limiter=rate_limiter,
-                        worker_id=worker_id,
-                    )
+                    try:
+                        processed = await jobs_service.process_one_job(
+                            session_factory,
+                            settings=settings,
+                            rate_limiter=rate_limiter,
+                            worker_id=worker_id,
+                        )
+                    except _DATABASE_ERRORS:
+                        raise
+                    except Exception:
+                        # One bad job must not kill the process. A job left `running` is
+                        # reclaimed once its lease expires.
+                        log.exception("worker: unexpected error while processing a job")
+                        break
                     if not processed:
                         break
-            except (
-                psycopg.OperationalError,
-                SQLAlchemyOperationalError,
-                SQLAlchemyTimeoutError,
-            ) as exc:
+            except _DATABASE_ERRORS as exc:
                 log.warning("worker database error: %s", exc)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=poll_timeout)

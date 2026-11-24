@@ -38,6 +38,7 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::text[]"),
             nullable=False,
         ),
+        sa.Column("payload", postgresql.JSONB(), nullable=True),
         sa.Column("paused_key_type", sa.Text(), nullable=True),
         sa.Column("paused_reason", sa.Text(), nullable=True),
         sa.Column(
@@ -51,6 +52,7 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("claimed_by", sa.Text(), nullable=True),
         sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
@@ -97,7 +99,20 @@ def upgrade() -> None:
         unique=False,
         postgresql_where=sa.text("status = 'queued'"),
     )
+    op.create_index(
+        "idx_jobs_lease_expiry",
+        "jobs",
+        ["lease_expires_at"],
+        unique=False,
+        postgresql_where=sa.text("status = 'running'"),
+    )
     op.create_index("idx_jobs_user_status", "jobs", ["user_id", "status"], unique=False)
+    op.create_index(
+        "idx_jobs_user_preset_created",
+        "jobs",
+        ["user_id", "preset_id", sa.literal_column("created_at DESC")],
+        unique=False,
+    )
 
     op.create_table(
         "runs",
@@ -105,6 +120,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("job_id", sa.Uuid(), nullable=False),
         sa.Column("preset_id", sa.Uuid(), nullable=True),
+        sa.Column("attempt", sa.Integer(), nullable=False),
         sa.Column("pipeline", sa.Text(), nullable=False),
         sa.Column("trigger", sa.Text(), nullable=False),
         sa.Column("status", sa.Text(), nullable=False),
@@ -130,12 +146,17 @@ def upgrade() -> None:
             name="fk_runs_preset",
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("job_id"),
     )
     op.create_index(
         "idx_runs_user_started",
         "runs",
         ["user_id", sa.literal_column("started_at DESC")],
+        unique=False,
+    )
+    op.create_index(
+        "idx_runs_job_started",
+        "runs",
+        ["job_id", sa.literal_column("started_at DESC")],
         unique=False,
     )
 
@@ -158,6 +179,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_run_events_run_id", "run_events", ["run_id", "id"], unique=False)
+    op.create_index("idx_run_events_user_id", "run_events", ["user_id"], unique=False)
 
     op.create_table(
         "served_titles",
@@ -190,11 +212,15 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("served_titles")
+    op.drop_index("idx_run_events_user_id", table_name="run_events")
     op.drop_index("idx_run_events_run_id", table_name="run_events")
     op.drop_table("run_events")
+    op.drop_index("idx_runs_job_started", table_name="runs")
     op.drop_index("idx_runs_user_started", table_name="runs")
     op.drop_table("runs")
+    op.drop_index("idx_jobs_user_preset_created", table_name="jobs")
     op.drop_index("idx_jobs_user_status", table_name="jobs")
+    op.drop_index("idx_jobs_lease_expiry", table_name="jobs")
     op.drop_index("idx_jobs_claimable", table_name="jobs")
     op.drop_index("uq_jobs_active_preset_kind", table_name="jobs")
     op.drop_table("jobs")

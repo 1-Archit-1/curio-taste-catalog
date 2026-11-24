@@ -34,6 +34,10 @@ class KeyValidationFailedError(ValueError):
 class KeyNotFoundError(LookupError):
     """Raised when a worker requests a key that the user has not configured."""
 
+    def __init__(self, message: str, key_type: KeyType | None = None) -> None:
+        super().__init__(message)
+        self.key_type = key_type
+
 
 @dataclass(frozen=True)
 class ResolvedLlmKey:
@@ -117,7 +121,10 @@ async def get_user_api_key(
         key_type=key_type.value,
     )
     if row is None:
-        raise KeyNotFoundError(f"no {key_type.value} key configured for user {user_id}")
+        raise KeyNotFoundError(
+            f"no {key_type.value} key configured for user {user_id}",
+            key_type=key_type,
+        )
 
     plaintext = decryptor.decrypt(row.encrypted_key)
     async with audit_session_factory() as audit_session:
@@ -235,7 +242,10 @@ async def pause_key_and_jobs(
     key_type: KeyType,
     reason: str,
 ) -> list[UUID]:
-    """Pause `key_type` for `user_id`, pause dependent jobs, and update `jobs_paused_reason`."""
+    """Pause `key_type` for `user_id`, pause its queued jobs, and update `jobs_paused_reason`.
+
+    Jobs already `running` are not touched here; each pauses itself when it hits the key error.
+    """
     await keys_repo.set_key_paused(
         session,
         user_id=user_id,

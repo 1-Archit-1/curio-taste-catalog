@@ -57,7 +57,13 @@ class Job(Base):
             "created_at",
             postgresql_where=text("status = 'queued'"),
         ),
+        Index(
+            "idx_jobs_lease_expiry",
+            "lease_expires_at",
+            postgresql_where=text("status = 'running'"),
+        ),
         Index("idx_jobs_user_status", "user_id", "status"),
+        Index("idx_jobs_user_preset_created", "user_id", "preset_id", desc("created_at")),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -87,6 +93,7 @@ class Job(Base):
         nullable=False,
         server_default=text("'{}'::text[]"),
     )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(postgresql.JSONB, nullable=True)
     paused_key_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_at: Mapped[datetime] = mapped_column(
@@ -107,6 +114,9 @@ class Job(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -121,7 +131,7 @@ class Job(Base):
 
 
 class Run(Base):
-    """Execution record for a single job attempt."""
+    """Execution record for a single job attempt. A job has one run per attempt."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -133,6 +143,7 @@ class Run(Base):
             name="fk_runs_preset",
         ),
         Index("idx_runs_user_started", "user_id", desc("started_at")),
+        Index("idx_runs_job_started", "job_id", desc("started_at")),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -148,10 +159,10 @@ class Run(Base):
     job_id: Mapped[UUID] = mapped_column(
         Uuid,
         ForeignKey("jobs.id", ondelete="CASCADE"),
-        unique=True,
         nullable=False,
     )
     preset_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     pipeline: Mapped[str] = mapped_column(Text, nullable=False)
     trigger: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
@@ -169,7 +180,10 @@ class RunEvent(Base):
     """Structured step-by-step progress event emitted during a run."""
 
     __tablename__ = "run_events"
-    __table_args__ = (Index("idx_run_events_run_id", "run_id", "id"),)
+    __table_args__ = (
+        Index("idx_run_events_run_id", "run_id", "id"),
+        Index("idx_run_events_user_id", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(
         BigInteger,

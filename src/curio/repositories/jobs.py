@@ -1,11 +1,12 @@
 """Background job queue, execution run, and run event persistence."""
 
 import json
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import and_, func, insert, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from curio.db.models.jobs import Job, Run, RunEvent
@@ -21,6 +22,7 @@ async def enqueue_job(
     job_kind: str,
     trigger: str,
     required_keys: list[str],
+    payload: dict[str, Any] | None = None,
     run_at: datetime | None = None,
 ) -> Job:
     """Insert a new queued job inside a savepoint so IntegrityError leaves the outer txn intact."""
@@ -31,6 +33,8 @@ async def enqueue_job(
         "trigger": trigger,
         "required_keys": required_keys,
     }
+    if payload is not None:
+        values["payload"] = payload
     if run_at is not None:
         values["run_at"] = run_at
 
@@ -64,36 +68,70 @@ async def get_latest_preset_job(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+@dataclass(frozen=True)
+class ClaimedJob:
+    job: Job
+    # True when the job was `running` with an expired lease, i.e. taken over from a dead worker.
+    reclaimed: bool
+
+
 async def claim_next_job(
     session: AsyncSession,
     *,
     worker_id: str,
-) -> Job | None:
-    """Claim the next runnable queued job using SKIP LOCKED."""
+    lease_seconds: int,
+) -> ClaimedJob | None:
+    """Claim the next runnable job using SKIP LOCKED.
+
+    Runnable means `queued` and due, or `running` with an expired lease (its worker died or
+    stopped renewing). The claim sets a fresh lease and counts one attempt.
+    """
     pick_stmt = (
-        select(Job.id)
-        .where(Job.status == "queued", Job.run_at <= func.now())
+        select(Job.id, Job.status)
+        .where(
+            or_(
+                and_(Job.status == "queued", Job.run_at <= func.now()),
+                and_(Job.status == "running", Job.lease_expires_at < func.now()),
+            )
+        )
         .order_by(Job.run_at.asc(), Job.created_at.asc())
         .with_for_update(skip_locked=True)
         .limit(1)
     )
-    job_id = (await session.execute(pick_stmt)).scalar_one_or_none()
-    if job_id is None:
+    picked = (await session.execute(pick_stmt)).one_or_none()
+    if picked is None:
         return None
-
     update_stmt = (
         update(Job)
-        .where(Job.id == job_id)
+        .where(Job.id == picked.id)
         .values(
             status="running",
             claimed_by=worker_id,
             claimed_at=func.now(),
+            lease_expires_at=func.now() + timedelta(seconds=lease_seconds),
             attempts=Job.attempts + 1,
             updated_at=func.now(),
         )
         .returning(Job)
     )
-    return (await session.execute(update_stmt)).scalar_one()
+    job = (await session.execute(update_stmt)).scalar_one()
+    return ClaimedJob(job=job, reclaimed=picked.status == "running")
+
+
+async def extend_job_lease(
+    session: AsyncSession,
+    *,
+    job_id: UUID,
+    worker_id: str,
+    lease_seconds: int,
+) -> bool:
+    """Push the lease out. Returns `False` if `worker_id` no longer owns the running job."""
+    stmt = (
+        update(Job)
+        .where(Job.id == job_id, Job.status == "running", Job.claimed_by == worker_id)
+        .values(lease_expires_at=func.now() + timedelta(seconds=lease_seconds))
+    )
+    return _updated(await session.execute(stmt))
 
 
 async def get_run_for_job(
@@ -102,7 +140,13 @@ async def get_run_for_job(
     user_id: UUID,
     job_id: UUID,
 ) -> Run | None:
-    stmt = select(Run).where(Run.user_id == user_id, Run.job_id == job_id)
+    """Return the job's latest run (one run exists per attempt)."""
+    stmt = (
+        select(Run)
+        .where(Run.user_id == user_id, Run.job_id == job_id)
+        .order_by(Run.started_at.desc(), Run.attempt.desc())
+        .limit(1)
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -112,6 +156,7 @@ async def create_run(
     user_id: UUID,
     job_id: UUID,
     preset_id: UUID | None,
+    attempt: int,
     pipeline: str,
     trigger: str,
 ) -> Run:
@@ -121,6 +166,7 @@ async def create_run(
             user_id=user_id,
             job_id=job_id,
             preset_id=preset_id,
+            attempt=attempt,
             pipeline=pipeline,
             trigger=trigger,
             status="running",
@@ -151,18 +197,44 @@ async def finish_run(
     await session.execute(stmt)
 
 
+def _updated(result: Any) -> bool:
+    return int(result.rowcount or 0) > 0
+
+
+async def fail_running_runs(
+    session: AsyncSession,
+    *,
+    job_id: UUID,
+    error: str,
+) -> list[Run]:
+    """Mark a job's still-`running` runs as failed (their worker is gone)."""
+    stmt = (
+        update(Run)
+        .where(Run.job_id == job_id, Run.status == "running")
+        .values(status="failed", error=error, finished_at=func.now())
+        .returning(Run)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def finish_job(
     session: AsyncSession,
     *,
     job_id: UUID,
+    worker_id: str,
     status: str,
     last_error: str | None = None,
     run_at: datetime | None = None,
-) -> None:
-    """Mark a job terminal (`succeeded`/`failed`/`cancelled`) or requeue it."""
+) -> bool:
+    """Mark a job terminal (`succeeded`/`failed`/`cancelled`) or requeue it.
+
+    Fenced: only applies while `worker_id` still owns the running job. Returns `False` if the
+    job was reclaimed or otherwise changed, in which case nothing is written.
+    """
     values: dict[str, Any] = {
         "status": status,
         "last_error": last_error,
+        "lease_expires_at": None,
         "updated_at": func.now(),
     }
     if status in _TERMINAL_JOB_STATUSES:
@@ -172,9 +244,38 @@ async def finish_job(
         values["claimed_at"] = None
         if run_at is not None:
             values["run_at"] = run_at
+    stmt = (
+        update(Job)
+        .where(Job.id == job_id, Job.status == "running", Job.claimed_by == worker_id)
+        .values(**values)
+    )
+    return _updated(await session.execute(stmt))
 
-    stmt = update(Job).where(Job.id == job_id).values(**values)
-    await session.execute(stmt)
+
+async def pause_job(
+    session: AsyncSession,
+    *,
+    job_id: UUID,
+    worker_id: str,
+    key_type: str,
+    reason: str,
+) -> bool:
+    """Pause the job `worker_id` is running, handing back the attempt it consumed (fenced)."""
+    stmt = (
+        update(Job)
+        .where(Job.id == job_id, Job.status == "running", Job.claimed_by == worker_id)
+        .values(
+            status="paused",
+            paused_key_type=key_type,
+            paused_reason=reason,
+            attempts=func.greatest(Job.attempts - 1, 0),
+            claimed_by=None,
+            claimed_at=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return _updated(await session.execute(stmt))
 
 
 async def append_run_event(
@@ -207,6 +308,7 @@ async def list_run_events_for_job(
     job_id: UUID,
     after_id: int = 0,
 ) -> list[RunEvent]:
+    """Events from every run of the job, by event id (what SSE streams)."""
     stmt = (
         select(RunEvent)
         .join(Run, RunEvent.run_id == Run.id)
@@ -220,19 +322,36 @@ async def list_run_events_for_job(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def list_run_events_for_run(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    run_id: UUID,
+) -> list[RunEvent]:
+    stmt = (
+        select(RunEvent)
+        .where(RunEvent.run_id == run_id, RunEvent.user_id == user_id)
+        .order_by(RunEvent.id.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+# One shared channel; the payload carries the job id so each API process needs a single LISTEN.
+JOB_EVENTS_CHANNEL = "job_events"
+
+
 async def notify_job_event(
     session: AsyncSession,
     *,
     job_id: UUID,
-    event_id: int,
+    event_id: int | None,
     status: str,
 ) -> None:
-    """Send a Postgres NOTIFY on the job's event channel for SSE listeners."""
-    channel = f"job_events_{job_id.hex}"
-    payload = json.dumps({"event_id": event_id, "status": status})
+    """NOTIFY `job_events`; delivered to API processes when the transaction commits."""
+    payload = json.dumps({"job_id": str(job_id), "event_id": event_id, "status": status})
     await session.execute(
         text("SELECT pg_notify(:channel, :payload)"),
-        {"channel": channel, "payload": payload},
+        {"channel": JOB_EVENTS_CHANNEL, "payload": payload},
     )
 
 
@@ -243,12 +362,16 @@ async def pause_user_jobs_for_key(
     key_type: str,
     reason: str,
 ) -> list[UUID]:
-    """Pause queued/running jobs for `user_id` that require `key_type`."""
+    """Pause the `queued` jobs of `user_id` that require `key_type`.
+
+    `running` jobs are left alone: each pauses itself, through the fenced `pause_job`, when it
+    hits the key error.
+    """
     stmt = (
         update(Job)
         .where(
             Job.user_id == user_id,
-            Job.status.in_(["queued", "running"]),
+            Job.status == "queued",
             Job.required_keys.contains([key_type]),
         )
         .values(
@@ -282,6 +405,7 @@ async def resume_user_jobs_for_key(
             paused_reason=None,
             claimed_by=None,
             claimed_at=None,
+            lease_expires_at=None,
             run_at=func.now(),
             updated_at=func.now(),
         )
