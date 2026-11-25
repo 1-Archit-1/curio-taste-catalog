@@ -15,9 +15,13 @@ from curio.db.engine import create_engine, create_session_factory
 from curio.services import health as health_service
 from curio.services import jobs as jobs_service
 from curio.services import media as media_service
+from curio.services import sources as sources_service
 from curio.settings import Settings
 
 log = logging.getLogger(__name__)
+
+# Public RSS sources polled per loop iteration. Small, so a backlog of due feeds can't delay jobs.
+RSS_POLLS_PER_ITERATION = 3
 
 _DATABASE_ERRORS = (
     psycopg.OperationalError,
@@ -62,6 +66,17 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
                         break
                     if not processed:
                         break
+                if not stop.is_set():
+                    try:
+                        await sources_service.poll_due_rss_sources(
+                            session_factory,
+                            settings=settings,
+                            max_sources=RSS_POLLS_PER_ITERATION,
+                        )
+                    except _DATABASE_ERRORS:
+                        raise
+                    except Exception:
+                        log.exception("worker: unexpected error while polling RSS sources")
             except _DATABASE_ERRORS as exc:
                 log.warning("worker database error: %s", exc)
             with contextlib.suppress(TimeoutError):

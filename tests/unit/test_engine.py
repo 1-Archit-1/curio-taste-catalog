@@ -44,6 +44,11 @@ def test_models_register_all_expected_tables():
         "runs",
         "run_events",
         "served_titles",
+        "sources",
+        "user_sources",
+        "source_items",
+        "import_issues",
+        "source_uploads",
     }
 
 
@@ -58,6 +63,8 @@ def test_per_user_tables_lead_primary_key_with_user_id():
         "catalog_candidates",
         "watch_history",
         "vetoes",
+        "user_sources",
+        "import_issues",
     ):
         pk_cols = [col.name for col in Base.metadata.tables[table_name].primary_key.columns]
         assert pk_cols[0] == "user_id", f"{table_name} PK does not start with user_id: {pk_cols}"

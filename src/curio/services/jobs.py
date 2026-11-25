@@ -19,6 +19,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from curio.clients.letterboxd import LetterboxdError
 from curio.clients.providers import KeyType
 from curio.clients.ratelimit import RateLimiter
 from curio.clients.tmdb import TmdbAuthError, TmdbError, TmdbRateLimitError
@@ -26,7 +27,9 @@ from curio.db.models.jobs import Job, Run, RunEvent
 from curio.repositories import catalogs as catalogs_repo
 from curio.repositories import jobs as jobs_repo
 from curio.repositories import keys as keys_repo
+from curio.repositories import sources as sources_repo
 from curio.services import keys as keys_service
+from curio.services import sources as sources_service
 from curio.services import starter
 from curio.services.keys import KeyNotFoundError
 from curio.settings import Settings
@@ -78,10 +81,22 @@ class KeyPausedError(Exception):
         )
 
 
+class PermanentJobError(Exception):
+    """Raised by a handler for a failure that retrying cannot fix. The job fails at once.
+
+    The message is shown to the user, so write it for them.
+    """
+
+
 # Run errors, `jobs.last_error` and run event messages are shown in the browser. Only these
 # exception types have messages written for users; extend the tuple to expose another type.
 # Every other exception is stored as a generic message and logged in full.
-USER_FACING_ERRORS: tuple[type[Exception], ...] = (TmdbError, KeyNotFoundError, KeyPausedError)
+USER_FACING_ERRORS: tuple[type[Exception], ...] = (
+    TmdbError,
+    KeyNotFoundError,
+    KeyPausedError,
+    PermanentJobError,
+)
 
 
 def safe_error_message(exc: BaseException) -> str:
@@ -140,6 +155,38 @@ async def _run_starter_pipeline(ctx: JobContext) -> None:
     )
 
 
+async def _run_lb_import(ctx: JobContext) -> None:
+    """Import an uploaded Letterboxd export. The stored upload is removed when the job ends."""
+    try:
+        await sources_service.run_lb_import_job(
+            ctx.session,
+            session_factory=ctx.session_factory,
+            settings=ctx.settings,
+            rate_limiter=ctx.rate_limiter,
+            job=ctx.job,
+            emit_step=ctx.emit_step,
+        )
+    except (LetterboxdError, sources_service.ImportJobInputError) as exc:
+        await _discard_import_upload(ctx)
+        raise PermanentJobError(str(exc)) from exc
+    except Exception as exc:
+        # A key failure pauses the job, and it will run again, so it still needs the upload.
+        out_of_attempts = ctx.job.attempts >= ctx.job.max_attempts
+        if key_type_for_exception(exc) is None and out_of_attempts:
+            await _discard_import_upload(ctx)
+        raise
+
+
+async def _discard_import_upload(ctx: JobContext) -> None:
+    try:
+        upload_id, _ = sources_service.lb_import_job_input(ctx.job)
+    except sources_service.ImportJobInputError:
+        return
+    await sources_service.discard_upload(
+        ctx.session_factory, user_id=ctx.job.user_id, upload_id=upload_id
+    )
+
+
 # Registry of job kinds. To add one (for example `compile`):
 #   1. Write `async def handler(ctx: JobContext) -> None`. Use `ctx.session` for database work
 #      (commit when the work should survive a later failure), `ctx.emit_step(step, message,
@@ -158,6 +205,12 @@ JOB_REGISTRY: dict[str, JobSpec] = {
         required_keys=(KeyType.TMDB,),
         handler=_run_starter_pipeline,
         success_message="Catalog refreshed.",
+    ),
+    "lb_import": JobSpec(
+        pipeline="lb_import",
+        required_keys=(KeyType.TMDB,),
+        handler=_run_lb_import,
+        success_message="Letterboxd export imported.",
     ),
 }
 
@@ -226,6 +279,33 @@ async def enqueue_regenerate_job(
         preset_id=preset_id,
         trigger=trigger,
     )
+
+
+async def enqueue_lb_import_job(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    filename: str,
+    data: bytes,
+    role: str,
+) -> Job:
+    """Store an uploaded export ZIP and enqueue the `lb_import` job that imports it.
+
+    Raises `DuplicateJobError` if an import is already queued or running for the user, and the
+    same key errors as `enqueue_job`. Nothing is stored in either case.
+    """
+    if await jobs_repo.has_active_job(session, user_id=user_id, job_kind="lb_import"):
+        raise DuplicateJobError("an import is already in progress")
+    async with session.begin_nested():
+        upload = await sources_repo.create_upload(
+            session, user_id=user_id, filename=filename, data=data
+        )
+        return await enqueue_job(
+            session,
+            user_id=user_id,
+            job_kind="lb_import",
+            payload={"upload_id": str(upload.id), "role": role},
+        )
 
 
 async def get_job(
@@ -578,7 +658,7 @@ async def _record_failure(
                 "paused",
             )
         else:
-            will_retry = job.attempts < job.max_attempts
+            will_retry = job.attempts < job.max_attempts and not isinstance(exc, PermanentJobError)
             log.exception(
                 "job %s failed (attempt %d/%d)",
                 job_id,

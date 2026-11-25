@@ -5,7 +5,17 @@ from collections.abc import AsyncIterator
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
@@ -62,14 +72,34 @@ from curio.api.schemas.settings import (
     SettingsResponse,
     UpdateSettingsRequest,
 )
+from curio.api.schemas.sources import (
+    CandidateMatchOut,
+    ImportIssueListResponse,
+    ImportIssueOut,
+    ImportIssueResolveRequest,
+    ImportIssueStatus,
+    ImportItemKind,
+    SourceCreateRequest,
+    SourceKind,
+    SourceListResponse,
+    SourceOut,
+    SourcePreviewItemOut,
+    SourcePreviewRequest,
+    SourcePreviewResponse,
+    SourceRole,
+    SourceUpdateRequest,
+)
+from curio.clients.letterboxd import MAX_ZIP_BYTES, LetterboxdError, LetterboxdNotFoundError
 from curio.clients.providers import LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
 from curio.db.models.jobs import Job, Run, RunEvent
+from curio.db.models.sources import ImportIssue
 from curio.db.models.users import User
 from curio.services import auth as auth_service
 from curio.services import catalogs as catalogs_service
 from curio.services import jobs as jobs_service
 from curio.services import keys as keys_service
+from curio.services import sources as sources_service
 from curio.services import users as users_service
 from curio.settings import Settings
 
@@ -740,3 +770,292 @@ async def stream_job_events(
         # Covers a client that disconnects before the generator first runs.
         background=BackgroundTask(release),
     )
+
+
+def _source_to_out(summary: sources_service.SourceSummary) -> SourceOut:
+    s = summary.source
+    us = summary.user_source
+    return SourceOut(
+        id=s.id,
+        kind=cast(SourceKind, s.kind),
+        external_key=s.external_key,
+        label=s.label,
+        url=s.url,
+        role=cast(SourceRole, us.role),
+        item_count=s.item_count,
+        last_refreshed_at=s.last_refreshed_at,
+        last_error=s.last_error,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
+def _issue_to_out(issue: ImportIssue) -> ImportIssueOut:
+    candidates = [
+        CandidateMatchOut(
+            media_type=cast(MediaType, c["media_type"]),
+            tmdb_id=int(c["tmdb_id"]),
+            name=str(c.get("name") or ""),
+            year=int(c["year"]) if c.get("year") is not None else None,
+            confidence=float(c.get("confidence") or 0.0),
+        )
+        for c in (issue.candidate_matches or [])
+    ]
+    return ImportIssueOut(
+        id=issue.id,
+        source_id=issue.source_id,
+        item_kind=cast(ImportItemKind, issue.item_kind),
+        raw_title=issue.raw_title,
+        raw_year=issue.raw_year,
+        letterboxd_url=issue.letterboxd_url,
+        rating=issue.rating,
+        watched_at=issue.watched_at,
+        confidence=issue.confidence,
+        candidate_matches=candidates,
+        status=cast(ImportIssueStatus, issue.status),
+        resolved_media_type=cast(MediaType | None, issue.resolved_media_type),
+        resolved_tmdb_id=issue.resolved_tmdb_id,
+        created_at=issue.created_at,
+        updated_at=issue.updated_at,
+    )
+
+
+@router.get("/sources")
+async def list_sources(user: CurrentUser, session: DbSession) -> SourceListResponse:
+    items = await sources_service.list_user_sources(session, user_id=user.id)
+    return SourceListResponse(sources=[_source_to_out(item) for item in items])
+
+
+@router.post("/sources/preview")
+async def preview_source(
+    payload: SourcePreviewRequest,
+    user: CurrentUser,
+) -> SourcePreviewResponse:
+    del user
+    try:
+        feed = await sources_service.preview_letterboxd_source(payload.input)
+    except LetterboxdNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except LetterboxdError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+    return SourcePreviewResponse(
+        kind="lb_diary_rss",
+        username=feed.username,
+        label=f"Letterboxd RSS (@{feed.username})",
+        url=feed.feed_url,
+        entry_count=len(feed.entries),
+        recent_titles=[
+            SourcePreviewItemOut(
+                title=e.title,
+                year=e.year,
+                rating=e.rating,
+                watched_at=e.watched_at,
+                tmdb_id=e.tmdb_id,
+            )
+            for e in feed.entries[:5]
+        ],
+    )
+
+
+@router.post("/sources", status_code=status.HTTP_201_CREATED)
+async def create_source(
+    payload: SourceCreateRequest,
+    user: CurrentUser,
+    session: DbSession,
+    settings: AppSettings,
+) -> SourceOut:
+    """Subscribe to a public Letterboxd diary RSS feed. Needs no TMDB key."""
+    try:
+        summary = await sources_service.add_rss_source(
+            session,
+            user_id=user.id,
+            input_value=payload.input,
+            role=payload.role,
+            settings=settings,
+        )
+    except LetterboxdNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except LetterboxdError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    return _source_to_out(summary)
+
+
+@router.patch("/sources/{source_id}")
+async def update_source(
+    source_id: UUID,
+    payload: SourceUpdateRequest,
+    user: CurrentUser,
+    session: DbSession,
+) -> SourceOut:
+    try:
+        summary = await sources_service.update_source_role(
+            session,
+            user_id=user.id,
+            source_id=source_id,
+            role=payload.role,
+        )
+    except sources_service.SourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    return _source_to_out(summary)
+
+
+@router.delete("/sources/{source_id}")
+async def delete_source(
+    source_id: UUID,
+    user: CurrentUser,
+    session: DbSession,
+) -> MessageResponse:
+    try:
+        await sources_service.remove_user_source(
+            session,
+            user_id=user.id,
+            source_id=source_id,
+        )
+    except sources_service.SourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    return MessageResponse(message="Source removed.")
+
+
+@router.post("/sources/{source_id}/refresh")
+async def refresh_source(
+    source_id: UUID,
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+    settings: AppSettings,
+) -> SourceOut:
+    """Fetch a public RSS source now. Needs no TMDB key."""
+    try:
+        summary = await sources_service.refresh_rss_source(
+            session,
+            session_factory=get_session_factory(request),
+            source_id=source_id,
+            user_id=user.id,
+            settings=settings,
+        )
+    except sources_service.SourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except sources_service.InvalidSourceOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except LetterboxdNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except LetterboxdError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    return _source_to_out(summary)
+
+
+# Starlette parses the multipart body before the route runs, so this limit is applied to a body
+# that has been received. A reverse proxy should also cap request bodies (see docs/architecture.md).
+_UPLOAD_READ_CHUNK = 1024 * 1024
+_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+_UPLOAD_TOO_LARGE = "Export ZIP exceeds the 50 MB size limit."
+
+
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    data = bytearray()
+    while chunk := await file.read(_UPLOAD_READ_CHUNK):
+        data.extend(chunk)
+        if len(data) > MAX_ZIP_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=_UPLOAD_TOO_LARGE
+            )
+    return bytes(data)
+
+
+@router.post("/sources/import-zip", status_code=status.HTTP_202_ACCEPTED)
+async def import_zip_source(
+    request: Request,
+    user: CurrentUser,
+    session: DbSession,
+    file: Annotated[UploadFile, File(...)],
+    role: Annotated[SourceRole, Form()] = "self",
+) -> JobOut:
+    """Queue a background `lb_import` job for an uploaded Letterboxd export ZIP.
+
+    Matching titles needs the user's TMDB key, which only workers can decrypt. Returns 202 with
+    the job once it is committed; follow it at `/api/jobs/{id}`. 413 if the file is over 50 MB,
+    422 if no TMDB key is configured, 409 if the key is paused or an import is already running.
+    """
+    declared = request.headers.get("content-length", "")
+    if declared.isdecimal() and int(declared) > MAX_ZIP_BYTES + _MULTIPART_OVERHEAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=_UPLOAD_TOO_LARGE)
+    data = await _read_upload_limited(file)
+    try:
+        job = await jobs_service.enqueue_lb_import_job(
+            session,
+            user_id=user.id,
+            filename=(file.filename or "export.zip")[:255],
+            data=data,
+            role=role,
+        )
+    except jobs_service.MissingRequiredKeysError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except (jobs_service.DuplicateJobError, jobs_service.KeyPausedError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    # Commit before responding: the client polls the job right away, possibly on another worker.
+    await session.commit()
+    return _job_to_out(job)
+
+
+@router.get("/import-issues")
+async def list_import_issues(
+    user: CurrentUser,
+    session: DbSession,
+    issue_status: Annotated[ImportIssueStatus | None, Query(alias="status")] = None,
+) -> ImportIssueListResponse:
+    issues, pending_count = await sources_service.list_import_issues(
+        session,
+        user_id=user.id,
+        status=issue_status,
+    )
+    return ImportIssueListResponse(
+        issues=[_issue_to_out(issue) for issue in issues],
+        pending_count=pending_count,
+    )
+
+
+@router.post("/import-issues/{issue_id}/resolve")
+async def resolve_import_issue(
+    issue_id: UUID,
+    payload: ImportIssueResolveRequest,
+    user: CurrentUser,
+    session: DbSession,
+) -> ImportIssueOut:
+    """Match an import issue to a TMDB title. Stores a stub from the data at hand; no TMDB call."""
+    try:
+        issue = await sources_service.resolve_import_issue(
+            session,
+            user_id=user.id,
+            issue_id=issue_id,
+            media_type=payload.media_type,
+            tmdb_id=payload.tmdb_id,
+        )
+    except sources_service.ImportIssueNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except sources_service.InvalidSourceOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    return _issue_to_out(issue)
+
+
+@router.post("/import-issues/{issue_id}/dismiss")
+async def dismiss_import_issue(
+    issue_id: UUID,
+    user: CurrentUser,
+    session: DbSession,
+) -> ImportIssueOut:
+    try:
+        issue = await sources_service.dismiss_import_issue(
+            session,
+            user_id=user.id,
+            issue_id=issue_id,
+        )
+    except sources_service.ImportIssueNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    return _issue_to_out(issue)

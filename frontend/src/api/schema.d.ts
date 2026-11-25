@@ -55,6 +55,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/import-issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Import Issues */
+        get: operations["list_import_issues_api_import_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-issues/{issue_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Import Issue */
+        post: operations["dismiss_import_issue_api_import_issues__issue_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import-issues/{issue_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Import Issue
+         * @description Match an import issue to a TMDB title. Stores a stub from the data at hand; no TMDB call.
+         */
+        post: operations["resolve_import_issue_api_import_issues__issue_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -320,6 +374,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["list_sources_api_sources_get"];
+        put?: never;
+        /**
+         * Create Source
+         * @description Subscribe to a public Letterboxd diary RSS feed. Needs no TMDB key.
+         */
+        post: operations["create_source_api_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/import-zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Zip Source
+         * @description Queue a background `lb_import` job for an uploaded Letterboxd export ZIP.
+         *
+         *     Matching titles needs the user's TMDB key, which only workers can decrypt. Returns 202 with
+         *     the job once it is committed; follow it at `/api/jobs/{id}`. 413 if the file is over 50 MB,
+         *     422 if no TMDB key is configured, 409 if the key is paused or an import is already running.
+         */
+        post: operations["import_zip_source_api_sources_import_zip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Source */
+        post: operations["preview_source_api_sources_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Source */
+        delete: operations["delete_source_api_sources__source_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Source */
+        patch: operations["update_source_api_sources__source_id__patch"];
+        trace?: never;
+    };
+    "/api/sources/{source_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Source
+         * @description Fetch a public RSS source now. Needs no TMDB key.
+         */
+        post: operations["refresh_source_api_sources__source_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vetoes/{media_type}/{tmdb_id}": {
         parameters: {
             query?: never;
@@ -367,6 +521,17 @@ export interface components {
             /** Entries */
             entries: components["schemas"]["AuditEntryResponse"][];
         };
+        /** Body_import_zip_source_api_sources_import_zip_post */
+        Body_import_zip_source_api_sources_import_zip_post: {
+            /** File */
+            file: string;
+            /**
+             * Role
+             * @default self
+             * @enum {string}
+             */
+            role: "self" | "taste" | "candidates";
+        };
         /** CandidateListResponse */
         CandidateListResponse: {
             /** Candidates */
@@ -376,6 +541,22 @@ export interface components {
              * Format: uuid
              */
             preset_id: string;
+        };
+        /** CandidateMatchOut */
+        CandidateMatchOut: {
+            /** Confidence */
+            confidence: number;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Name */
+            name: string;
+            /** Tmdb Id */
+            tmdb_id: number;
+            /** Year */
+            year?: number | null;
         };
         /** CandidateOut */
         CandidateOut: {
@@ -411,6 +592,75 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ImportIssueListResponse */
+        ImportIssueListResponse: {
+            /** Issues */
+            issues: components["schemas"]["ImportIssueOut"][];
+            /** Pending Count */
+            pending_count: number;
+        };
+        /** ImportIssueOut */
+        ImportIssueOut: {
+            /** Candidate Matches */
+            candidate_matches: components["schemas"]["CandidateMatchOut"][];
+            /** Confidence */
+            confidence?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Item Kind
+             * @enum {string}
+             */
+            item_kind: "watched" | "rating" | "diary" | "watchlist" | "list";
+            /** Letterboxd Url */
+            letterboxd_url?: string | null;
+            /** Rating */
+            rating?: number | null;
+            /** Raw Title */
+            raw_title: string;
+            /** Raw Year */
+            raw_year?: number | null;
+            /** Resolved Media Type */
+            resolved_media_type?: ("movie" | "series") | null;
+            /** Resolved Tmdb Id */
+            resolved_tmdb_id?: number | null;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "resolved" | "dismissed";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Watched At */
+            watched_at?: string | null;
+        };
+        /** ImportIssueResolveRequest */
+        ImportIssueResolveRequest: {
+            /**
+             * Media Type
+             * @default movie
+             * @enum {string}
+             */
+            media_type: "movie" | "series";
+            /** Tmdb Id */
+            tmdb_id: number;
         };
         /** JobOut */
         JobOut: {
@@ -677,6 +927,106 @@ export interface components {
             /** Slot Id */
             slot_id: string;
         };
+        /** SourceCreateRequest */
+        SourceCreateRequest: {
+            /** Input */
+            input: string;
+            /**
+             * Role
+             * @default self
+             * @enum {string}
+             */
+            role: "self" | "taste" | "candidates";
+        };
+        /** SourceListResponse */
+        SourceListResponse: {
+            /** Sources */
+            sources: components["schemas"]["SourceOut"][];
+        };
+        /** SourceOut */
+        SourceOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** External Key */
+            external_key: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Item Count */
+            item_count: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv";
+            /** Label */
+            label: string;
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Refreshed At */
+            last_refreshed_at?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "self" | "taste" | "candidates";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Url */
+            url?: string | null;
+        };
+        /** SourcePreviewItemOut */
+        SourcePreviewItemOut: {
+            /** Rating */
+            rating?: number | null;
+            /** Title */
+            title: string;
+            /** Tmdb Id */
+            tmdb_id?: number | null;
+            /** Watched At */
+            watched_at?: string | null;
+            /** Year */
+            year?: number | null;
+        };
+        /** SourcePreviewRequest */
+        SourcePreviewRequest: {
+            /** Input */
+            input: string;
+        };
+        /** SourcePreviewResponse */
+        SourcePreviewResponse: {
+            /** Entry Count */
+            entry_count: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv";
+            /** Label */
+            label: string;
+            /** Recent Titles */
+            recent_titles: components["schemas"]["SourcePreviewItemOut"][];
+            /** Url */
+            url: string;
+            /** Username */
+            username: string;
+        };
+        /** SourceUpdateRequest */
+        SourceUpdateRequest: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "self" | "taste" | "candidates";
+        };
         /** UpdateSettingsRequest */
         UpdateSettingsRequest: {
             llm_provider: components["schemas"]["KeyType"];
@@ -807,6 +1157,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserSummaryResponse"];
+                };
+            };
+        };
+    };
+    list_import_issues_api_import_issues_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "resolved" | "dismissed") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportIssueListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_import_issue_api_import_issues__issue_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportIssueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_import_issue_api_import_issues__issue_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                issue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportIssueResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportIssueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1332,6 +1779,222 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SlotOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sources_api_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceListResponse"];
+                };
+            };
+        };
+    };
+    create_source_api_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_zip_source_api_sources_import_zip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_zip_source_api_sources_import_zip_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_source_api_sources_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourcePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_source_api_sources__source_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_source_api_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_source_api_sources__source_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceOut"];
                 };
             };
             /** @description Validation Error */
