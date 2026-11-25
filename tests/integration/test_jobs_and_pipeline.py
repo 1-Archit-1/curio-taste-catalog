@@ -311,7 +311,7 @@ async def test_starter_pipeline_populates_movie_and_series_presets(
     respx_mock.get(f"{TMDB_BASE_URL}/movie/101").mock(
         return_value=httpx.Response(200, json=_movie_detail(101, "Lower Vote", 8.0, 500))
     )
-    respx_mock.get(f"{TMDB_BASE_URL}/movie/102").mock(
+    vetoed_detail = respx_mock.get(f"{TMDB_BASE_URL}/movie/102").mock(
         return_value=httpx.Response(200, json=_movie_detail(102, "Vetoed Movie", 9.0, 900))
     )
     respx_mock.get(f"{TMDB_BASE_URL}/movie/103").mock(
@@ -355,6 +355,10 @@ async def test_starter_pipeline_populates_movie_and_series_presets(
         )
         # 102 vetoed, 104 below min_rating 7.0; 103 has more votes than 101 at same 8.0 rating
         assert [c.tmdb_id for c in movie_candidates] == [103, 101]
+        # The vetoed title is dropped before hydration, so no TMDB detail call is made for it.
+        assert vetoed_detail.call_count == 0
+        vetoed = await s.get(MediaItem, ("movie", 102))
+        assert vetoed is not None and vetoed.hydrated_at is None
 
         series_candidates = (
             (

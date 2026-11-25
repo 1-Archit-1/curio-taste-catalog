@@ -1,0 +1,352 @@
+{
+  "adult": false,
+  "backdrop_path": "/5KqYxpOgP5II48Am70S3aK0xuOp.jpg",
+  "belongs_to_collection": null,
+  "budget": 400000,
+  "credits": {
+    "cast": [
+      {
+        "adult": false,
+        "cast_id": 6,
+        "character": "Vic",
+        "credit_id": "52fe43e2c3a36847f8076219",
+        "gender": 2,
+        "id": 25129,
+        "known_for_department": "Acting",
+        "name": "Don Johnson",
+        "order": 0,
+        "original_name": "Don Johnson",
+        "popularity": 3.0248,
+        "profile_path": "/6s6oav541p7xspCG6PvXut7knkP.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 7,
+        "character": "Quilla June Holmes",
+        "credit_id": "52fe43e2c3a36847f807621d",
+        "gender": 1,
+        "id": 40000,
+        "known_for_department": "Acting",
+        "name": "Susanne Benton",
+        "order": 1,
+        "original_name": "Susanne Benton",
+        "popularity": 0.6701,
+        "profile_path": "/d6yKpCepyxOOKl8JyowdCJLO2eS.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 8,
+        "character": "Lou Craddock",
+        "credit_id": "52fe43e2c3a36847f8076221",
+        "gender": 2,
+        "id": 4765,
+        "known_for_department": "Acting",
+        "name": "Jason Robards",
+        "order": 2,
+        "original_name": "Jason Robards",
+        "popularity": 1.7378,
+        "profile_path": "/9y0HAtWWBkB02gVzh8QDdz6UYZH.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 9,
+        "character": "Blood (Voice)",
+        "credit_id": "52fe43e2c3a36847f8076225",
+        "gender": 2,
+        "id": 39998,
+        "known_for_department": "Acting",
+        "name": "Tim McIntire",
+        "order": 3,
+        "original_name": "Tim McIntire",
+        "popularity": 0.5019,
+        "profile_path": "/by3ZgApPcmHVuNur19K5Vw8Z33a.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 10,
+        "character": "Dr. Moore",
+        "credit_id": "52fe43e2c3a36847f8076229",
+        "gender": 2,
+        "id": 40001,
+        "known_for_department": "Acting",
+        "name": "Alvy Moore",
+        "order": 4,
+        "original_name": "Alvy Moore",
+        "popularity": 0.5191,
+        "profile_path": "/3974gHUAsew2gV5hPZeBWj5cK9a.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 11,
+        "character": "Mez Smith",
+        "credit_id": "52fe43e2c3a36847f807622d",
+        "gender": 1,
+        "id": 40002,
+        "known_for_department": "Acting",
+        "name": "Helene Winston",
+        "order": 5,
+        "original_name": "Helene Winston",
+        "popularity": 0.4445,
+        "profile_path": "/vzveIXmjmnkWAu6Wa3H1FVxd9MN.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 12,
+        "character": "Preacher",
+        "credit_id": "52fe43e2c3a36847f8076231",
+        "gender": 2,
+        "id": 8233,
+        "known_for_department": "Acting",
+        "name": "Charles McGraw",
+        "order": 6,
+        "original_name": "Charles McGraw",
+        "popularity": 0.8851,
+        "profile_path": "/ufUi3tG67j3WWWnMvbl2x8cDryU.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 13,
+        "character": "Michael",
+        "credit_id": "52fe43e2c3a36847f8076235",
+        "gender": 2,
+        "id": 15781,
+        "known_for_department": "Acting",
+        "name": "Hal Baylor",
+        "order": 7,
+        "original_name": "Hal Baylor",
+        "popularity": 0.945,
+        "profile_path": "/usvcfTKGUkUhfLA2Q3PrACcAF6H.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 14,
+        "character": "Fellini",
+        "credit_id": "52fe43e2c3a36847f8076239",
+        "gender": 2,
+        "id": 40003,
+        "known_for_department": "Acting",
+        "name": "Ron Feinberg",
+        "order": 8,
+        "original_name": "Ron Feinberg",
+        "popularity": 0.5386,
+        "profile_path": "/6u4CuN2Um9lxsi9JnV7pwMpAZDS.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 15,
+        "character": "Gery",
+        "credit_id": "52fe43e2c3a36847f807623d",
+        "gender": 2,
+        "id": 40004,
+        "known_for_department": "Acting",
+        "name": "Michael Rupert",
+        "order": 9,
+        "original_name": "Michael Rupert",
+        "popularity": 0.2554,
+        "profile_path": "/iEqDTYhlrcmLojiyh4LaC17MRjS.jpg"
+      },
+      {
+        "adult": false,
+        "cast_id": 16,
+        "character": "Ken",
+        "credit_id": "52fe43e2c3a36847f8076241",
+        "gender": 2,
+        "id": 40005,
+        "known_for_department": "Acting",
+        "name": "Don Carter",
+        "order": 10,
+        "original_name": "Don Carter",
+        "popularity": 0.1055,
+        "profile_path": null
+      },
+      {
+        "adult": false,
+        "cast_id": 17,
+        "character": "Richard",
+        "credit_id": "52fe43e2c3a36847f8076245",
+        "gender": 2,
+        "id": 40006,
+        "known_for_department": "Acting",
+        "name": "Michael Hershman",
+        "order": 11,
+        "original_name": "Michael Hershman",
+        "popularity": 0.0411,
+        "profile_path": null
+      }
+    ],
+    "crew": [
+      {
+        "adult": false,
+        "credit_id": "52fe43e2c3a36847f8076215",
+        "department": "Camera",
+        "gender": 2,
+        "id": 39999,
+        "job": "Director of Photography",
+        "known_for_department": "Camera",
+        "name": "John Arthur Morrill",
+        "original_name": "John Arthur Morrill",
+        "popularity": 0.0437,
+        "profile_path": null
+      },
+      {
+        "adult": false,
+        "credit_id": "52fe43e2c3a36847f8076203",
+        "department": "Writing",
+        "gender": 2,
+        "id": 15783,
+        "job": "Novel",
+        "known_for_department": "Writing",
+        "name": "Harlan Ellison",
+        "original_name": "Harlan Ellison",
+        "popularity": 0.5386,
+        "profile_path": "/cZpQf3CzimPmcoNlcAAnNSHijQI.jpg"
+      },
+      {
+        "adult": false,
+        "credit_id": "52fe43e2c3a36847f80761fd",
+        "department": "Directing",
+        "gender": 2,
+        "id": 8262,
+        "job": "Director",
+        "known_for_department": "Acting",
+        "name": "L.Q. Jones",
+        "original_name": "L.Q. Jones",
+        "popularity": 1.7122,
+        "profile_path": "/vSGLFloekrgC8eIaqxCiKe7VW0u.jpg"
+      },
+      {
+        "adult": false,
+        "credit_id": "52fe43e2c3a36847f807620f",
+        "department": "Sound",
+        "gender": 2,
+        "id": 39998,
+        "job": "Original Music Composer",
+        "known_for_department": "Acting",
+        "name": "Tim McIntire",
+        "original_name": "Tim McIntire",
+        "popularity": 0.5019,
+        "profile_path": "/by3ZgApPcmHVuNur19K5Vw8Z33a.jpg"
+      },
+      {
+        "adult": false,
+        "credit_id": "648d39992f8d0900c6654e07",
+        "department": "Crew",
+        "gender": 2,
+        "id": 161753,
+        "job": "Stunt Coordinator",
+        "known_for_department": "Crew",
+        "name": "William H. Burton Sr.",
+        "original_name": "William H. Burton Sr.",
+        "popularity": 0.3717,
+        "profile_path": null
+      }
+    ]
+  },
+  "external_ids": {
+    "facebook_id": null,
+    "imdb_id": "tt0072730",
+    "instagram_id": null,
+    "twitter_id": null,
+    "wikidata_id": "Q1194657"
+  },
+  "genres": [
+    {
+      "id": 18,
+      "name": "Drama"
+    },
+    {
+      "id": 878,
+      "name": "Science Fiction"
+    },
+    {
+      "id": 35,
+      "name": "Comedy"
+    }
+  ],
+  "homepage": "",
+  "id": 4917,
+  "imdb_id": "tt0072730",
+  "keywords": {
+    "keywords": [
+      {
+        "id": 818,
+        "name": "based on novel or book"
+      },
+      {
+        "id": 1475,
+        "name": "telepathy"
+      },
+      {
+        "id": 4565,
+        "name": "dystopia"
+      },
+      {
+        "id": 4458,
+        "name": "post-apocalyptic future"
+      },
+      {
+        "id": 4049,
+        "name": "decoy"
+      },
+      {
+        "id": 15162,
+        "name": "dog"
+      },
+      {
+        "id": 18034,
+        "name": "desert"
+      },
+      {
+        "id": 158416,
+        "name": "boy and dog"
+      },
+      {
+        "id": 163045,
+        "name": "impregnation"
+      },
+      {
+        "id": 208152,
+        "name": "pets"
+      }
+    ]
+  },
+  "origin_country": [
+    "US"
+  ],
+  "original_language": "en",
+  "original_title": "A Boy and His Dog",
+  "overview": "Set in the year 2024 in post-apocalyptic America, 18-year old Vic and his telepathic dog, Blood, are scavengers in the desolate wilderness ravaged by World War IV, where survivors must battle for food and shelter in the desert-like wasteland. Vic and Blood eke out a meager existence, foraging for food and fighting gangs of cutthroats.",
+  "popularity": 2.3469,
+  "poster_path": "/dMbkoFzD5sEQvEaqRsIh4pTBJVq.jpg",
+  "production_companies": [
+    {
+      "id": 1814,
+      "logo_path": null,
+      "name": "LQ/JAF",
+      "origin_country": ""
+    }
+  ],
+  "production_countries": [
+    {
+      "iso_3166_1": "US",
+      "name": "United States of America"
+    }
+  ],
+  "release_date": "1975-03-23",
+  "revenue": 6900000,
+  "runtime": 91,
+  "softcore": false,
+  "spoken_languages": [
+    {
+      "english_name": "English",
+      "iso_639_1": "en",
+      "name": "English"
+    }
+  ],
+  "status": "Released",
+  "tagline": "A rather kinky tale of survival.",
+  "title": "A Boy and His Dog",
+  "video": false,
+  "vote_average": 6.287,
+  "vote_count": 415
+}
