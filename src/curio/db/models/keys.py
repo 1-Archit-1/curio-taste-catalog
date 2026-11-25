@@ -21,6 +21,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from curio.db.models import Base
 
 _KEY_TYPE_CHECK = "key_type IN ('tmdb', 'gemini', 'openai', 'anthropic', 'openrouter')"
+# Simkl tokens live in `simkl_connections`, not `user_api_keys`, but workers decrypt them through
+# the same audited key access, so the audit log accepts the type.
+_AUDIT_KEY_TYPE_CHECK = (
+    "key_type IN ('tmdb', 'gemini', 'openai', 'anthropic', 'openrouter', 'simkl')"
+)
 
 
 class UserApiKey(Base):
@@ -50,7 +55,7 @@ class UserApiKey(Base):
 class KeyDecryptAudit(Base):
     __tablename__ = "key_decrypt_audit"
     __table_args__ = (
-        CheckConstraint(_KEY_TYPE_CHECK, name="key_decrypt_audit_key_type_check"),
+        CheckConstraint(_AUDIT_KEY_TYPE_CHECK, name="key_decrypt_audit_key_type_check"),
         Index("idx_key_decrypt_audit_user_created", "user_id", desc("created_at"), desc("id")),
     )
 

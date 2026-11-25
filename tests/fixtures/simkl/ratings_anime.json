@@ -1,0 +1,30 @@
+{
+  "anime": [
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "tv",
+      "last_watched": null,
+      "last_watched_at": "2025-02-03T09:00:00Z",
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "anidb": "23",
+          "anilist": "1",
+          "mal": "1",
+          "simkl": 37089,
+          "slug": "cowboy-bebop",
+          "tmdb": "30991"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Cowboy Bebop",
+        "year": 1998
+      },
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-07-03T10:00:00Z",
+      "user_rating": 9,
+      "watched_episodes_count": 0
+    }
+  ]
+}

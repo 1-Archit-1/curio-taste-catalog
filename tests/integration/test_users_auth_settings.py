@@ -726,3 +726,17 @@ def test_cli_user_creation_and_addon_token_rotation(
         # Clean up committed CLI test row from the session test database.
         with psycopg.connect(migrated_database_url, autocommit=True) as cleanup:
             cleanup.execute("DELETE FROM users WHERE username = %s", (username,))
+
+
+async def test_simkl_is_not_an_api_key_in_settings(client: httpx.AsyncClient, make_committed_user):
+    provisioned = await make_committed_user("simkl_key_user")
+    await client.post("/api/auth/login", json={"token": provisioned.login_token})
+    keys = (await client.get("/api/settings")).json()["keys"]
+    assert sorted(keys) == ["anthropic", "gemini", "openai", "openrouter", "tmdb"]
+    for method, url in (
+        ("POST", "/api/settings/keys/simkl/test"),
+        ("PUT", "/api/settings/keys/simkl"),
+        ("DELETE", "/api/settings/keys/simkl"),
+    ):
+        resp = await client.request(method, url, json={"api_key": "x"})
+        assert resp.status_code == 404, (method, url)

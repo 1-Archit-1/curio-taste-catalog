@@ -10,7 +10,7 @@ from curio.api.schemas.catalogs import MediaType
 
 # TMDB IDs are stored in a 32-bit integer column.
 MAX_TMDB_ID = 2_147_483_647
-SourceKind = Literal["lb_diary_rss", "lb_profile_csv", "lb_list_csv"]
+SourceKind = Literal["lb_diary_rss", "lb_profile_csv", "lb_list_csv", "simkl"]
 SourceRole = Literal["self", "taste", "candidates"]
 ImportItemKind = Literal["watched", "rating", "diary", "watchlist", "list"]
 ImportIssueStatus = Literal["pending", "resolved", "dismissed"]

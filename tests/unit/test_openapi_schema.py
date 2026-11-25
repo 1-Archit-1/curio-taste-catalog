@@ -68,6 +68,7 @@ ACCEPTED_ROUTES = frozenset(
     {
         ("post", "/api/presets/{preset_id}/regenerate"),
         ("post", "/api/sources/import-zip"),
+        ("post", "/api/simkl/sync"),
     }
 )
 

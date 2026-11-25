@@ -48,6 +48,11 @@ services:
       KEY_PUBLIC_KEY: ${KEY_PUBLIC_KEY:-}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Simkl (#6): the API starts the OAuth flow and exchanges the code; the worker refreshes
+      # and revokes tokens, so it needs the secret too.
+      SIMKL_CLIENT_ID: ${SIMKL_CLIENT_ID:-}
+      SIMKL_CLIENT_SECRET: ${SIMKL_CLIENT_SECRET:-}
+      SIMKL_REDIRECT_URI: ${SIMKL_REDIRECT_URI:-}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     restart: unless-stopped
@@ -61,6 +66,9 @@ services:
       <<: *app-env
       # Only workers hold the private key (ADR 0002).
       KEY_PRIVATE_KEY: ${KEY_PRIVATE_KEY:-}
+      SIMKL_CLIENT_ID: ${SIMKL_CLIENT_ID:-}
+      SIMKL_CLIENT_SECRET: ${SIMKL_CLIENT_SECRET:-}
+      SIMKL_REDIRECT_URI: ${SIMKL_REDIRECT_URI:-}
       # The TMDB request budget is split evenly across worker replicas (one process each).
       # Compose has no env_file, so these must be passed explicitly to reach the container.
       TMDB_REQUESTS_PER_SECOND_TOTAL: ${TMDB_REQUESTS_PER_SECOND_TOTAL:-40}

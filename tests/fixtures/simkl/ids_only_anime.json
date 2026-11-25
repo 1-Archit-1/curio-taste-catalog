@@ -1,0 +1,58 @@
+{
+  "anime": [
+    {
+      "show": {
+        "ids": {
+          "anidb": "23",
+          "anilist": "1",
+          "mal": "1",
+          "simkl": 37089,
+          "slug": "cowboy-bebop",
+          "tmdb": "30991"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "anidb": "112",
+          "mal": "199",
+          "simkl": 12,
+          "slug": "spirited-away",
+          "tmdb": "129"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "anidb": "9541",
+          "mal": "16498",
+          "simkl": 38636,
+          "slug": "attack-on-titan",
+          "tmdb": "1429"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "anidb": "13241",
+          "mal": "38524",
+          "simkl": 931899,
+          "slug": "attack-on-titan-season-3-part-2",
+          "tmdb": "1429"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "mal": "9999",
+          "simkl": 13,
+          "slug": "some-anime-without-tmdb"
+        }
+      }
+    }
+  ]
+}

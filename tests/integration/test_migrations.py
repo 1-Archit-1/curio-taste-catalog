@@ -36,7 +36,7 @@ def test_migrations_apply_to_empty_database_and_are_idempotent(empty_database_ur
     with psycopg.connect(empty_database_url) as conn:
         versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
         has_vector = conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'").fetchone()
-    assert versions == ["0005"]
+    assert versions == ["0006"]
     assert has_vector is not None
 
 
@@ -126,6 +126,125 @@ def test_sources_migration_enforces_ownership_and_downgrades_cleanly(empty_datab
     command.check(cfg)
 
 
+def test_simkl_migration_constrains_new_values_and_downgrades_with_simkl_rows(
+    empty_database_url,
+):
+    cfg = make_alembic_config(empty_database_url)
+    command.upgrade(cfg, "head")
+    with psycopg.connect(empty_database_url, autocommit=True) as conn:
+        user_id = _insert_user(conn)
+        insert_source = (
+            "INSERT INTO sources (kind, owner_user_id, external_key, label) "
+            "VALUES (%s, %s, %s, 'x') RETURNING id"
+        )
+        # A Simkl source belongs to its user, like an export.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(insert_source, ("simkl", None, "account"))
+        simkl_id = conn.execute(insert_source, ("simkl", user_id, "account")).fetchone()[0]
+        lb_id = conn.execute(insert_source, ("lb_profile_csv", user_id, "profile")).fetchone()[0]
+        conn.execute(
+            "INSERT INTO media_items (media_type, tmdb_id, name) VALUES ('series', 1, 'S')"
+        )
+        insert_item = (
+            "INSERT INTO source_items (source_id, media_type, tmdb_id, item_kind) "
+            "VALUES (%s, 'series', 1, %s)"
+        )
+        for kind in ("watching", "dropped"):
+            conn.execute(insert_item, (simkl_id, kind))
+        conn.execute(insert_item, (lb_id, "watched"))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(insert_item, (simkl_id, "plantowatch"))
+        # Import issues keep the narrower set: only exports and feeds produce them.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO import_issues (user_id, source_id, item_kind, raw_title) "
+                "VALUES (%s, %s, 'dropped', 't')",
+                (user_id, simkl_id),
+            )
+        conn.execute(
+            "INSERT INTO watch_history (user_id, media_type, tmdb_id, status, source_id) "
+            "VALUES (%s, 'series', 1, 'dropped', %s)",
+            (user_id, simkl_id),
+        )
+        conn.execute(
+            "INSERT INTO simkl_connections (user_id, source_id, access_token_ciphertext, "
+            "refresh_token_ciphertext, access_expires_at, scope) "
+            "VALUES (%s, %s, '\\x01', '\\x02', now(), 'media:read')",
+            (user_id, simkl_id),
+        )
+        conn.execute(
+            "INSERT INTO simkl_revocations (user_id, refresh_token_ciphertext) "
+            "VALUES (%s, '\\x03')",
+            (user_id,),
+        )
+        conn.execute(
+            "INSERT INTO simkl_oauth_states (state_hash, user_id, session_hash, "
+            "code_verifier, expires_at) VALUES ('h', %s, 's', 'v', now())",
+            (user_id,),
+        )
+        for kind in ("simkl_sync", "simkl_revoke", "regenerate"):
+            conn.execute("INSERT INTO jobs (user_id, job_kind) VALUES (%s, %s)", (user_id, kind))
+        # One active Simkl sync per user, but any number of other jobs.
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            conn.execute(
+                "INSERT INTO jobs (user_id, job_kind) VALUES (%s, 'simkl_sync')", (user_id,)
+            )
+        conn.execute("INSERT INTO jobs (user_id, job_kind) VALUES (%s, 'simkl_revoke')", (user_id,))
+        for key_type in ("simkl", "tmdb"):
+            conn.execute(
+                "INSERT INTO key_decrypt_audit (user_id, key_type, reason) VALUES (%s, %s, 'test')",
+                (user_id, key_type),
+            )
+        # The key table itself still only holds pasted keys.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO user_api_keys (user_id, key_type, encrypted_key, last4) "
+                "VALUES (%s, 'simkl', '\\x01', 'abcd')",
+                (user_id,),
+            )
+        # One connection per user, and one per source.
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            conn.execute(
+                "INSERT INTO simkl_connections (user_id, source_id, access_token_ciphertext, "
+                "refresh_token_ciphertext, access_expires_at, scope) "
+                "VALUES (%s, %s, '\\x01', '\\x02', now(), 'media:read')",
+                (user_id, simkl_id),
+            )
+    command.downgrade(cfg, "0005")
+    with psycopg.connect(empty_database_url, autocommit=True) as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+            )
+        }
+        assert tables.isdisjoint({"simkl_connections", "simkl_revocations", "simkl_oauth_states"})
+        assert [r[0] for r in conn.execute("SELECT kind FROM sources")] == ["lb_profile_csv"]
+        assert [r[0] for r in conn.execute("SELECT item_kind FROM source_items")] == ["watched"]
+        assert conn.execute("SELECT count(*) FROM watch_history").fetchone()[0] == 0
+        assert [r[0] for r in conn.execute("SELECT job_kind FROM jobs")] == ["regenerate"]
+        assert [r[0] for r in conn.execute("SELECT key_type FROM key_decrypt_audit")] == ["tmdb"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("INSERT INTO jobs (user_id, job_kind) SELECT id, 'simkl_sync' FROM users")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO sources (kind, owner_user_id, external_key, label) "
+                "SELECT 'simkl', id, 'account', 'x' FROM users"
+            )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO key_decrypt_audit (user_id, key_type, reason) "
+                "SELECT id, 'simkl', 'x' FROM users"
+            )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO source_items (source_id, media_type, tmdb_id, item_kind) "
+                "SELECT id, 'series', 1, 'dropped' FROM sources"
+            )
+    command.upgrade(cfg, "head")
+    command.check(cfg)
+
+
 def test_concurrent_runs_apply_each_migration_once(empty_database_url):
     env = {**os.environ, "DATABASE_URL": empty_database_url}
 
@@ -143,4 +262,4 @@ def test_concurrent_runs_apply_each_migration_once(empty_database_url):
 
     with psycopg.connect(empty_database_url) as conn:
         versions = [r[0] for r in conn.execute("SELECT version_num FROM alembic_version")]
-    assert versions == ["0005"]
+    assert versions == ["0006"]

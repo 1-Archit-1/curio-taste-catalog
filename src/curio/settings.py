@@ -1,5 +1,9 @@
-from pydantic import Field
+from urllib.parse import urlsplit
+
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SIMKL_CALLBACK_PATH = "/api/simkl/callback"
 
 
 class Settings(BaseSettings):
@@ -61,6 +65,51 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     public_base_url: str | None = None
     frontend_dist_dir: str | None = None
+
+    # Simkl (#6): register a "Server apps & services" app (AUTH V2) at simkl.com/settings/developer.
+    # The redirect URI is never taken from a request. It is SIMKL_REDIRECT_URI, or
+    # PUBLIC_BASE_URL + /api/simkl/callback. The API and the worker both need the client secret
+    # (the worker refreshes and revokes tokens).
+    simkl_client_id: str | None = None
+    simkl_client_secret: SecretStr | None = None
+    simkl_redirect_uri: str | None = None
+
+    @field_validator("simkl_client_id", "simkl_client_secret", "simkl_redirect_uri", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # docker-compose passes unset variables through as empty strings.
+        return (value.strip() or None) if isinstance(value, str) else value
+
+    @field_validator("simkl_redirect_uri")
+    @classmethod
+    def _redirect_uri_is_absolute_http(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError("SIMKL_REDIRECT_URI must be an absolute http(s) URL")
+        if parts.query or parts.fragment:
+            # Simkl compares the URI as a plain string and rejects a query or fragment.
+            raise ValueError("SIMKL_REDIRECT_URI must not have a query string or fragment")
+        return value
+
+    @property
+    def simkl_effective_redirect_uri(self) -> str | None:
+        """The `redirect_uri` sent to Simkl's authorize and token endpoints, or `None`."""
+        if self.simkl_redirect_uri:
+            return self.simkl_redirect_uri
+        if self.public_base_url and self.public_base_url.strip():
+            return self.public_base_url.strip().rstrip("/") + SIMKL_CALLBACK_PATH
+        return None
+
+    @property
+    def simkl_oauth_configured(self) -> bool:
+        return bool(
+            self.simkl_client_id
+            and self.simkl_client_secret
+            and self.simkl_client_secret.get_secret_value()
+            and self.simkl_effective_redirect_uri
+        )
 
     @property
     def tmdb_requests_per_second_per_process(self) -> float:
