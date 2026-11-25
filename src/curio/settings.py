@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     tmdb_requests_per_second_total: float = 40.0
     worker_process_count: int = 1
     tmdb_poster_base_url: str = "https://image.tmdb.org/t/p/w500"
+    tmdb_max_pages: int = Field(
+        default=5,
+        ge=1,
+        le=500,
+        description="Most TMDB list pages one page-walking lookup reads. TMDB serves at most 500.",
+    )
+    tmdb_cache_max_age_days: int = Field(
+        default=7,
+        ge=1,
+        description=(
+            "Days before a cached title is refreshed from TMDB the next time it is requested. "
+            "Must be at least 1: 0 would refresh every title on every request."
+        ),
+    )
 
     # Embeddings (#4). The stored column is vector(768); changing the dimension needs a migration.
     embedding_model: str = "gemini-embedding-001"

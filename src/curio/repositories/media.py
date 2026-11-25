@@ -2,9 +2,9 @@
 
 import logging
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import case, func, null, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,19 +16,53 @@ MediaKey = tuple[str, int]
 log = logging.getLogger(__name__)
 
 
+# `MediaItem` columns that `services.media.embedding_text` is built from. A refresh that changes
+# any of them invalidates the stored embedding; keep this in step with that function.
+EMBEDDING_INPUT_COLUMNS = ("name", "year", "genres", "keywords", "directors", "description")
+
+
 async def get_hydrated(
-    session: AsyncSession, keys: Sequence[MediaKey]
-) -> dict[MediaKey, MediaItem]:
-    """Cache lookup: rows for `keys` that have already been hydrated from TMDB."""
+    session: AsyncSession, keys: Sequence[MediaKey], *, max_age_days: int
+) -> tuple[dict[MediaKey, MediaItem], set[MediaKey]]:
+    """Cache lookup: rows for `keys` that have already been hydrated from TMDB.
+
+    Returns the rows and, separately, the keys among them that are stale: hydrated more than
+    `max_age_days` ago. A row exactly `max_age_days` old is still fresh. Staleness is decided by
+    the database clock (`now()`), the same one that stamps `hydrated_at`.
+    """
     if not keys:
-        return {}
-    rows = await session.scalars(
-        select(MediaItem).where(
+        return {}, set()
+    stale = MediaItem.hydrated_at < func.now() - timedelta(days=max_age_days)
+    rows = await session.execute(
+        select(MediaItem, stale).where(
             tuple_(MediaItem.media_type, MediaItem.tmdb_id).in_(list(keys)),
             MediaItem.hydrated_at.is_not(None),
         )
     )
-    return {(r.media_type, r.tmdb_id): r for r in rows}
+    items: dict[MediaKey, MediaItem] = {}
+    stale_keys: set[MediaKey] = set()
+    for item, is_stale in rows:
+        key = (item.media_type, item.tmdb_id)
+        items[key] = item
+        if is_stale:
+            stale_keys.add(key)
+    return items, stale_keys
+
+
+async def touch_hydrated(session: AsyncSession, key: MediaKey) -> MediaItem | None:
+    """Mark an already-hydrated row as freshly checked without changing its data."""
+    stmt = (
+        update(MediaItem)
+        .where(
+            MediaItem.media_type == key[0],
+            MediaItem.tmdb_id == key[1],
+            MediaItem.hydrated_at.is_not(None),
+        )
+        .values(hydrated_at=func.now(), updated_at=func.now())
+        .returning(MediaItem)
+        .execution_options(populate_existing=True)
+    )
+    return (await session.scalars(stmt)).one_or_none()
 
 
 async def upsert_hydrated(
@@ -83,10 +117,21 @@ async def upsert_hydrated(
     }
 
     async def run(row_values: dict) -> MediaItem:
+        insert = pg_insert(MediaItem).values(media_type=media_type, tmdb_id=tmdb_id, **row_values)
+        # A refresh keeps the stored embedding unless something the embedding is built from
+        # changed. `IS DISTINCT FROM` compares NULLs and arrays the way we want.
+        inputs_changed = or_(
+            *(
+                getattr(MediaItem, col).is_distinct_from(getattr(insert.excluded, col))
+                for col in EMBEDDING_INPUT_COLUMNS
+            )
+        )
+        embedding = case((inputs_changed, null()), else_=MediaItem.embedding)
         stmt = (
-            pg_insert(MediaItem)
-            .values(media_type=media_type, tmdb_id=tmdb_id, **row_values)
-            .on_conflict_do_update(index_elements=["media_type", "tmdb_id"], set_=row_values)
+            insert.on_conflict_do_update(
+                index_elements=["media_type", "tmdb_id"],
+                set_={**row_values, "embedding": embedding},
+            )
             .returning(MediaItem)
             .execution_options(populate_existing=True)
         )

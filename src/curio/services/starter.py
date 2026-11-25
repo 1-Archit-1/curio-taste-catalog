@@ -16,6 +16,8 @@ from curio.settings import Settings
 
 STARTER_SEED_LIMIT = 5
 STARTER_CANDIDATE_LIMIT = 50
+# Unexcluded, servable titles to collect per seed: one TMDB page's worth.
+STARTER_PER_SEED_LIMIT = 20
 
 
 async def run_starter_pipeline(
@@ -67,6 +69,9 @@ async def run_starter_pipeline(
         private_key=settings.key_private_key,
     )
 
+    # Excluded titles (watched, vetoed) are dropped before hydration, not after.
+    excluded_rows = await catalogs_repo.list_excluded_titles(session, user_id=job.user_id)
+    excluded_keys = {(row.media_type, row.tmdb_id) for row in excluded_rows}
     pool: dict[tuple[str, int], MediaItem] = {}
     async with TmdbClient(tmdb_key, rate_limiter) as client:
         await emit_step(
@@ -75,13 +80,14 @@ async def run_starter_pipeline(
             {"seed_count": len(seeds)},
         )
         for seed_id in seeds:
-            items = await media_service.recommend_titles(
+            items = await media_service.recommend_unexcluded_titles(
                 session,
                 client,
                 media_type,
                 seed_id,
+                limit=STARTER_PER_SEED_LIMIT,
+                excluded_keys=excluded_keys,
                 settings=settings,
-                page=1,
             )
             for item in items:
                 pool.setdefault((item.media_type, item.tmdb_id), item)
