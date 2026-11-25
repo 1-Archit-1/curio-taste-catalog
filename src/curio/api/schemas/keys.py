@@ -15,6 +15,7 @@ class KeyStatusResponse(BaseModel):
     configured: bool
     last4: str | None = None
     updated_at: datetime | None = None
+    paused_reason: str | None = None
 
 
 class KeyTestResponse(BaseModel):

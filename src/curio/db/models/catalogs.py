@@ -269,3 +269,37 @@ class Veto(Base):
         DateTime(timezone=True),
         server_default=text("now()"),
     )
+
+
+class ServedTitle(Base):
+    """Per-user, per-preset record of titles served to Stremio/Nuvio."""
+
+    __tablename__ = "served_titles"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["user_id", "preset_id"],
+            ["presets.user_id", "presets.id"],
+            ondelete="CASCADE",
+            name="fk_served_titles_preset",
+        ),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    preset_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    media_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    tmdb_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    first_served_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    last_served_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    serve_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )

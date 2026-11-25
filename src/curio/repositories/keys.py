@@ -18,6 +18,8 @@ class ApiKeyMetadataRow:
     last4: str
     created_at: datetime
     updated_at: datetime
+    paused_reason: str | None = None
+    paused_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,8 @@ async def list_api_key_metadata(
             UserApiKey.last4,
             UserApiKey.created_at,
             UserApiKey.updated_at,
+            UserApiKey.paused_reason,
+            UserApiKey.paused_at,
         )
         .where(UserApiKey.user_id == user_id)
         .order_by(UserApiKey.key_type)
@@ -91,6 +95,8 @@ async def list_api_key_metadata(
             last4=row.last4,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            paused_reason=row.paused_reason,
+            paused_at=row.paused_at,
         )
         for row in rows
     ]
@@ -206,3 +212,43 @@ async def update_encrypted_key(
         .values(encrypted_key=encrypted_key, updated_at=func.now())
     )
     await session.execute(stmt)
+
+
+async def set_key_paused(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    key_type: str,
+    reason: str | None,
+) -> None:
+    """Pause or resume a user's API key by updating `paused_reason` and `paused_at`.
+
+    `updated_at` is left alone: it records when the key was last replaced.
+    """
+    stmt = (
+        update(UserApiKey)
+        .where(UserApiKey.user_id == user_id, UserApiKey.key_type == key_type)
+        .values(
+            paused_reason=reason,
+            paused_at=func.now() if reason is not None else None,
+        )
+    )
+    await session.execute(stmt)
+
+
+async def list_paused_keys(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+) -> list[tuple[str, str]]:
+    """Return `(key_type, paused_reason)` for all paused keys belonging to `user_id`."""
+    stmt = (
+        select(UserApiKey.key_type, UserApiKey.paused_reason)
+        .where(
+            UserApiKey.user_id == user_id,
+            UserApiKey.paused_reason.is_not(None),
+        )
+        .order_by(UserApiKey.key_type)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(row.key_type, row.paused_reason) for row in rows if row.paused_reason is not None]

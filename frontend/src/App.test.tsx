@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +66,8 @@ describe("Curio Control Plane SPA", () => {
   });
 
   afterEach(() => {
+    // Unmount before unstubbing fetch so no in-flight request escapes the mock.
+    cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });

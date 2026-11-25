@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: float = 5.0
     worker_heartbeat_seconds: float = 30.0
     log_level: str = "INFO"
+    # Job queue (#25). A running job holds a lease that its worker renews every lease/3 seconds;
+    # another worker reclaims the job once the lease has expired.
+    job_lease_seconds: int = Field(default=120, ge=10)
+    # SSE job streams (#25). Limits are per API process.
+    sse_max_streams_per_user: int = Field(default=5, ge=1)
+    sse_max_stream_seconds: float = Field(default=1800.0, gt=0)
+    # Upper bound for the best-effort served-titles write after an addon catalog response.
+    served_titles_timeout_seconds: float = Field(default=2.0, gt=0)
 
     # TMDB rate limiting (#4). The limit is per process: the total request budget divided by
     # the number of worker processes (TMDB asks for roughly 40-50 requests/second per IP).

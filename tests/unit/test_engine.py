@@ -40,6 +40,10 @@ def test_models_register_all_expected_tables():
         "catalog_candidates",
         "watch_history",
         "vetoes",
+        "jobs",
+        "runs",
+        "run_events",
+        "served_titles",
     }
 
 

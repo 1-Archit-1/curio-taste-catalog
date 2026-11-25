@@ -7,7 +7,7 @@ revocable `addon_token` in the URL path.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
@@ -117,6 +117,7 @@ async def addon_manifest(
 
 async def _serve_catalog(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: DbSession,
     settings: AppSettings,
     *,
@@ -157,12 +158,22 @@ async def _serve_catalog(
         }
         for item in items
     ]
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if items and session_factory is not None:
+        background_tasks.add_task(
+            catalogs_service.record_served_titles_best_effort,
+            session_factory,
+            user_id=user.id,
+            items=[(i.preset_id, i.media_type, i.tmdb_id) for i in items],
+            timeout_seconds=settings.served_titles_timeout_seconds,
+        )
     return JSONResponse({"metas": metas}, headers=_NO_CACHE_HEADERS)
 
 
 @router.get("/{addon_token}/catalog/{media_type}/{catalog_id}.json")
 async def addon_catalog(
     request: Request,
+    background_tasks: BackgroundTasks,
     addon_token: str,
     media_type: str,
     catalog_id: str,
@@ -172,6 +183,7 @@ async def addon_catalog(
 ) -> JSONResponse:
     return await _serve_catalog(
         request,
+        background_tasks,
         session,
         settings,
         addon_token=addon_token,
@@ -185,6 +197,7 @@ async def addon_catalog(
 @router.get("/{addon_token}/catalog/{media_type}/{catalog_id}/{extra}.json")
 async def addon_catalog_extra(
     request: Request,
+    background_tasks: BackgroundTasks,
     addon_token: str,
     media_type: str,
     catalog_id: str,
@@ -195,6 +208,7 @@ async def addon_catalog_extra(
 ) -> JSONResponse:
     return await _serve_catalog(
         request,
+        background_tasks,
         session,
         settings,
         addon_token=addon_token,
