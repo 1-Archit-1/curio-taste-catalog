@@ -24,3 +24,27 @@ def test_embedding_batch_size_bounds_are_accepted(size):
         _env_file=None, database_url="postgresql://unused", embedding_batch_size=size
     )
     assert settings.embedding_batch_size == size
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tmdb_cache_max_age_days", 0),
+        ("tmdb_cache_max_age_days", -1),
+        ("tmdb_max_pages", 0),
+        ("tmdb_max_pages", 501),
+    ],
+)
+def test_tmdb_cache_settings_reject_out_of_range_values(field, value):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="postgresql://unused", **{field: value})
+
+
+def test_tmdb_cache_settings_bounds_are_accepted():
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql://unused",
+        tmdb_cache_max_age_days=1,
+        tmdb_max_pages=500,
+    )
+    assert (settings.tmdb_cache_max_age_days, settings.tmdb_max_pages) == (1, 500)

@@ -1,12 +1,12 @@
 import json
 import logging
 import math
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from curio.clients.embeddings import BASE_URL as GEMINI_URL
 from curio.clients.embeddings import EMBEDDING_DIMENSIONS, EmbeddingError, GeminiEmbedder
@@ -42,6 +42,12 @@ def tmdb_routes(respx_mock):
         ),
         "movie_777443": respx_mock.get(f"{BASE_URL}/movie/777443").mock(
             return_value=httpx.Response(200, json=load("movie_777443.json"))
+        ),
+        "movie_647763": respx_mock.get(f"{BASE_URL}/movie/647763").mock(
+            return_value=httpx.Response(200, json=load("movie_647763.json"))
+        ),
+        "movie_4917": respx_mock.get(f"{BASE_URL}/movie/4917").mock(
+            return_value=httpx.Response(200, json=load("movie_4917.json"))
         ),
         "tv_1396": respx_mock.get(f"{BASE_URL}/tv/1396").mock(
             return_value=httpx.Response(200, json=load("tv_1396.json"))
@@ -96,7 +102,7 @@ async def test_hydrate_persists_movie_and_series_metadata(session, tmdb, tmdb_ro
     assert series.keyword_ids[:3] == [1508, 2231, 5857]
     assert series.vote_count == 19166
     assert series.original_language == "en"
-    assert series.runtime is None  # the recorded response has an empty episode_run_time
+    assert series.runtime == 56  # empty episode_run_time falls back to last_episode_to_air
     assert series.release_date == date(2008, 1, 20)
     assert series.collection_id is None
     assert series.year == 2008
@@ -390,3 +396,414 @@ async def test_auth_error_stops_remaining_fetches_but_keeps_earlier_titles(
     assert unauthorized.call_count < len(refs)
     assert unauthorized.call_count <= media_service.HYDRATE_CONCURRENCY
     assert (await session.get(MediaItem, ("movie", 603))).hydrated_at is not None
+
+
+async def test_stale_cache_entries_rehydrate_on_demand_only(session, tmdb, tmdb_routes):
+    now = datetime.now(UTC)
+    stale_time = now - timedelta(days=8)
+    fresh_time = now - timedelta(days=2)
+
+    # 603 is stale and will reappear; 87101 is stale and will NOT reappear; 777443 is fresh.
+    session.add_all(
+        [
+            MediaItem(
+                media_type="movie",
+                tmdb_id=603,
+                imdb_id="tt0133093",
+                name="Old Matrix",
+                hydrated_at=stale_time,
+            ),
+            MediaItem(
+                media_type="movie",
+                tmdb_id=87101,
+                imdb_id="tt1340138",
+                name="Old Terminator",
+                hydrated_at=stale_time,
+            ),
+            MediaItem(
+                media_type="movie",
+                tmdb_id=777443,
+                imdb_id="tt7766378",
+                name="Fresh Electric State",
+                hydrated_at=fresh_time,
+            ),
+        ]
+    )
+    await session.flush()
+
+    items = await media_service.hydrate_titles(
+        session,
+        tmdb,
+        [TmdbRef("movie", 603), TmdbRef("movie", 777443)],
+        settings=SETTINGS,
+    )
+    by_id = {i.tmdb_id: i for i in items}
+    assert by_id[603].name == "The Matrix"
+    assert by_id[603].hydrated_at > stale_time
+    assert by_id[777443].name == "Fresh Electric State"
+
+    assert tmdb_routes["movie_603"].call_count == 1
+    assert tmdb_routes["movie_777443"].call_count == 0
+    assert tmdb_routes["movie_87101"].call_count == 0
+
+    untouched = await session.get(MediaItem, ("movie", 87101))
+    assert untouched.name == "Old Terminator"
+    assert untouched.hydrated_at == stale_time
+
+
+async def test_similar_titles_hydrates_in_order(session, tmdb, tmdb_routes, respx_mock):
+    respx_mock.get(f"{BASE_URL}/movie/603/similar").mock(
+        return_value=httpx.Response(200, json=load("similar_movie_603.json"))
+    )
+    items = await media_service.similar_titles(session, tmdb, "movie", 603, settings=SETTINGS)
+    # Both titles are hydrated in order; 647763 has no IMDb ID, so it can't be served.
+    assert [i.tmdb_id for i in items] == [4917]
+    assert items[0].imdb_id == "tt0072730"
+    assert tmdb_routes["movie_647763"].call_count == 1
+
+
+async def test_discover_unexcluded_walks_pages_skips_excluded_and_stops_at_limit(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    page1 = {
+        "page": 1,
+        "results": [
+            {"id": 603, "title": "The Matrix", "release_date": "1999-03-31"},
+            {"id": 1836920, "title": "Deadline", "release_date": "2026-11-20"},  # no imdb_id
+            {"id": 1836957, "title": "Mama Bear", "release_date": ""},
+        ],
+    }
+    page2 = {
+        "page": 2,
+        "results": [
+            {"id": 87101, "title": "Terminator Genisys", "release_date": "2015-06-23"},
+            {"id": 777443, "title": "The Electric State", "release_date": "2025-02-24"},
+        ],
+    }
+    discover_route = respx_mock.get(f"{BASE_URL}/discover/movie").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json=page2),
+            httpx.Response(200, json={"page": 3, "results": []}),
+        ]
+    )
+
+    items = await media_service.discover_unexcluded_titles(
+        session,
+        tmdb,
+        "movie",
+        limit=2,
+        excluded_keys={("movie", 603)},
+        settings=SETTINGS,
+    )
+    assert [i.tmdb_id for i in items] == [1836957, 87101]
+    assert discover_route.call_count == 2
+    assert tmdb_routes["movie_603"].call_count == 0  # excluded before hydration
+    # Page 2 needs 1 more item, so its chunk is 1 + HYDRATE_BUFFER and covers both titles.
+    assert tmdb_routes["movie_777443"].call_count == 1
+
+
+async def test_page_walking_stops_at_max_pages_or_empty_page(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    settings = Settings(_env_file=None, database_url="postgresql://unused", tmdb_max_pages=2)
+    page1 = {"page": 1, "results": [{"id": 603, "title": "The Matrix", "release_date": "1999"}]}
+    page2 = {"page": 2, "results": [{"id": 87101, "title": "Terminator", "release_date": "2015"}]}
+    rec_route = respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json=page2),
+            httpx.Response(200, json={"page": 3, "results": []}),
+        ]
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=10, settings=settings
+    )
+    assert [i.tmdb_id for i in items] == [603, 87101]
+    assert rec_route.call_count == 2  # stopped at tmdb_max_pages=2
+
+    sim_route = respx_mock.get(f"{BASE_URL}/movie/603/similar").mock(
+        side_effect=[
+            httpx.Response(200, json=page1),
+            httpx.Response(200, json={"page": 2, "results": []}),
+        ]
+    )
+    sim_items = await media_service.similar_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=10, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in sim_items] == [603]
+    assert sim_route.call_count == 2  # stopped on empty page 2 before tmdb_max_pages=5
+
+
+def _age(days: float, seconds: float = 0):
+    """SQL expression for `now() - days`: the database clock, as the cache uses."""
+    return func.now() - timedelta(days=days, seconds=seconds)
+
+
+async def _seed_cached(session, tmdb_id: int, name: str, *, age_days: float, seconds: float = 0):
+    session.add(
+        MediaItem(
+            media_type="movie",
+            tmdb_id=tmdb_id,
+            imdb_id=f"tt{tmdb_id:07d}",
+            name=name,
+            hydrated_at=_age(age_days, seconds),
+        )
+    )
+    await session.flush()
+
+
+async def _db_now(session) -> datetime:
+    return (await session.execute(select(func.now()))).scalar_one()
+
+
+def _warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+
+@pytest.mark.parametrize(
+    "route_kwargs",
+    [
+        {"return_value": httpx.Response(500)},
+        {"return_value": httpx.Response(429, headers={"Retry-After": "0"})},
+        {"side_effect": httpx.ReadTimeout("slow")},
+    ],
+    ids=["5xx", "429", "timeout"],
+)
+async def test_stale_refresh_failure_serves_the_cached_row(
+    session, tmdb, respx_mock, caplog, route_kwargs
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    stale_at = (await session.get(MediaItem, ("movie", 603))).hydrated_at
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(**route_kwargs)
+    items = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in items] == ["Old Matrix"]
+    assert route.called
+    # Still stale, so the next request tries again.
+    assert items[0].hydrated_at == stale_at
+    assert any("movie 603" in m and "serving the cached row" in m for m in _warnings(caplog))
+
+
+async def test_entirely_stale_batch_swallows_auth_error(session, tmdb, respx_mock, caplog):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    await _seed_cached(session, 87101, "Old Terminator", age_days=9)
+    respx_mock.get(url__regex=rf"{BASE_URL}/movie/\d+").mock(return_value=httpx.Response(401))
+    items = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603), TmdbRef("movie", 87101)], settings=SETTINGS
+    )
+    assert [i.name for i in items] == ["Old Matrix", "Old Terminator"]
+    assert any("TmdbAuthError" in m for m in _warnings(caplog))
+
+
+async def test_auth_error_for_a_never_hydrated_title_still_raises(session, tmdb, respx_mock):
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(401))
+    with pytest.raises(TmdbAuthError):
+        await media_service.hydrate_titles(
+            session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+        )
+
+
+async def test_stale_auth_error_raises_when_a_never_hydrated_title_failed(
+    session, tmdb, respx_mock
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(401))
+    respx_mock.get(f"{BASE_URL}/movie/87101").mock(return_value=httpx.Response(500))
+    with pytest.raises(TmdbAuthError):
+        await media_service.hydrate_titles(
+            session, tmdb, [TmdbRef("movie", 87101), TmdbRef("movie", 603)], settings=SETTINGS
+        )
+
+
+async def test_cache_age_boundary_is_exclusive(session, tmdb, tmdb_routes):
+    max_age = SETTINGS.tmdb_cache_max_age_days
+    await _seed_cached(session, 603, "Exactly Max Age", age_days=max_age)
+    await _seed_cached(session, 87101, "A Second Too Old", age_days=max_age, seconds=1)
+    items = await media_service.hydrate_titles(
+        session,
+        tmdb,
+        [TmdbRef("movie", 603), TmdbRef("movie", 87101)],
+        settings=SETTINGS,
+    )
+    assert {i.tmdb_id: i.name for i in items} == {
+        603: "Exactly Max Age",
+        87101: "Terminator Genisys",
+    }
+    assert tmdb_routes["movie_603"].call_count == 0
+    assert tmdb_routes["movie_87101"].call_count == 1
+
+
+async def test_stale_title_that_now_404s_keeps_cached_row_and_is_not_refetched(
+    session, tmdb, respx_mock
+):
+    await _seed_cached(session, 603, "Old Matrix", age_days=8)
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(return_value=httpx.Response(404))
+    first = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in first] == ["Old Matrix"]
+    assert first[0].hydrated_at == await _db_now(session)
+    again = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    assert [i.name for i in again] == ["Old Matrix"]
+    assert route.call_count == 1
+
+
+async def test_collect_hydrates_only_remaining_plus_buffer_per_page(
+    session, tmdb, tmdb_routes, respx_mock
+):
+    ids = [603, 87101, 777443, 1836957, 1836920, 647763, 4917]
+    page1 = {"results": [{"id": i, "title": f"T{i}", "release_date": "2000-01-01"} for i in ids]}
+    route = respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        return_value=httpx.Response(200, json=page1)
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=1, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in items] == [603]
+    assert route.call_count == 1  # no second page needed
+    hydrated = {name for name, r in tmdb_routes.items() if r.call_count and name != "discover"}
+    # 1 needed + HYDRATE_BUFFER (3) candidates, and nothing from the tail of the page.
+    assert hydrated == {"movie_603", "movie_87101", "movie_777443", "movie_1836957"}
+
+
+async def test_collect_moves_to_the_next_chunk_when_a_chunk_has_nothing_servable(
+    session, tmdb, tmdb_routes, respx_mock, monkeypatch
+):
+    monkeypatch.setattr(media_service, "HYDRATE_BUFFER", 0)
+    # 1836920 and 647763 have no IMDb ID, so chunks of 1 are hydrated until 603 is found.
+    ids = [1836920, 647763, 603, 87101]
+    page = {"results": [{"id": i, "title": f"T{i}", "release_date": "2000-01-01"} for i in ids]}
+    respx_mock.get(f"{BASE_URL}/movie/603/recommendations").mock(
+        return_value=httpx.Response(200, json=page)
+    )
+    items = await media_service.recommend_unexcluded_titles(
+        session, tmdb, "movie", 603, limit=1, settings=SETTINGS
+    )
+    assert [i.tmdb_id for i in items] == [603]
+    counts = {n: tmdb_routes[n].call_count for n in ("movie_1836920", "movie_647763", "movie_603")}
+    assert counts == {"movie_1836920": 1, "movie_647763": 1, "movie_603": 1}
+    assert tmdb_routes["movie_87101"].call_count == 0
+
+
+_EMBEDDING_FIELDS = dict(
+    media_type="movie",
+    tmdb_id=603,
+    imdb_id="tt0133093",
+    name="The Matrix",
+    year=1999,
+    description="A hacker.",
+    rating=8.3,
+    poster_path=None,
+    poster_url=None,
+    genres=["Action"],
+    keywords=["dystopia"],
+    cast_names=["Keanu Reeves"],
+    directors=["Lana Wachowski"],
+    genre_ids=[28],
+    keyword_ids=[4565],
+    vote_count=100,
+    popularity=1.5,
+    original_language="en",
+    runtime=120,
+    release_date=date(1999, 3, 31),
+    collection_id=None,
+    collection_name=None,
+)
+_CHANGED = {
+    "name": "The Matrix Reloaded",
+    "year": 2003,
+    "description": "A hacker, again.",
+    "genres": ["Action", "Science Fiction"],
+    "keywords": ["dystopia", "simulation"],
+    "directors": ["Lana Wachowski", "Lilly Wachowski"],
+}
+
+
+async def _stored_embedding(session, **overrides):
+    await media_repo.upsert_hydrated(session, **_EMBEDDING_FIELDS)
+    await media_repo.set_embedding(
+        session, media_type="movie", tmdb_id=603, embedding=[0.5] * EMBEDDING_DIMENSIONS
+    )
+    item = await media_repo.upsert_hydrated(session, **{**_EMBEDDING_FIELDS, **overrides})
+    await session.refresh(item)
+    return item
+
+
+async def test_refresh_with_unchanged_embedding_inputs_keeps_the_vector(session):
+    item = await _stored_embedding(
+        session,
+        # Fields the embedding does not use may change.
+        rating=7.0,
+        vote_count=500,
+        cast_names=["Someone Else"],
+        genre_ids=[28, 878],
+        keyword_ids=[4565, 1],
+    )
+    assert item.embedding is not None and item.embedding[0] == 0.5
+    assert item.vote_count == 500
+
+
+@pytest.mark.parametrize("column", sorted(_CHANGED))
+async def test_refresh_clears_the_vector_when_an_embedding_input_changed(session, column):
+    item = await _stored_embedding(session, **{column: _CHANGED[column]})
+    assert item.embedding is None
+    assert getattr(item, column) == _CHANGED[column]
+
+
+async def test_refresh_clears_the_vector_when_an_input_becomes_null(session):
+    item = await _stored_embedding(session, description=None)
+    assert item.embedding is None
+
+
+def test_embedding_input_columns_match_embedding_text():
+    def make(**overrides):
+        fields = {
+            "name": "N",
+            "year": 2000,
+            "description": "D",
+            "genres": ["G"],
+            "keywords": ["K"],
+            "directors": ["R"],
+            "cast_names": ["C"],
+        }
+        return MediaItem(media_type="movie", tmdb_id=1, **{**fields, **overrides})
+
+    base_text = media_service.embedding_text(make())
+    assert set(_CHANGED) == set(media_repo.EMBEDDING_INPUT_COLUMNS)
+    for column, value in _CHANGED.items():
+        assert media_service.embedding_text(make(**{column: value})) != base_text, column
+    assert media_service.embedding_text(make(cast_names=["Other"])) == base_text
+
+
+async def test_stale_refresh_keeps_embedding_when_tmdb_data_is_unchanged(session, tmdb, respx_mock):
+    route = respx_mock.get(f"{BASE_URL}/movie/603").mock(
+        return_value=httpx.Response(200, json=load("movie_603.json"))
+    )
+    [item] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await media_repo.set_embedding(
+        session, media_type="movie", tmdb_id=603, embedding=[0.25] * EMBEDDING_DIMENSIONS
+    )
+    await session.execute(update(MediaItem).values(hydrated_at=_age(8)))
+    [refreshed] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await session.refresh(refreshed)
+    assert route.call_count == 2
+    assert refreshed.embedding is not None and refreshed.embedding[0] == 0.25
+    # TMDB now reports different keywords: the vector is dropped so it is re-embedded.
+    changed = load("movie_603.json")
+    changed["keywords"]["keywords"] = changed["keywords"]["keywords"][:2]
+    route.mock(return_value=httpx.Response(200, json=changed))
+    await session.execute(update(MediaItem).values(hydrated_at=_age(8)))
+    [refreshed] = await media_service.hydrate_titles(
+        session, tmdb, [TmdbRef("movie", 603)], settings=SETTINGS
+    )
+    await session.refresh(refreshed)
+    assert refreshed.embedding is None
+    assert len(refreshed.keywords) == 2
