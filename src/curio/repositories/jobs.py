@@ -67,6 +67,21 @@ async def has_active_job(session: AsyncSession, *, user_id: UUID, job_kind: str)
     return bool(await session.scalar(stmt))
 
 
+async def get_running_job(session: AsyncSession, *, user_id: UUID, job_kind: str) -> Job | None:
+    """The user's newest `queued` or `running` job of this kind. A paused one waits on the user."""
+    stmt = (
+        select(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.job_kind == job_kind,
+            Job.status.in_(("queued", "running")),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def get_latest_preset_job(
     session: AsyncSession,
     *,
@@ -211,8 +226,12 @@ async def finish_run(
     await session.execute(stmt)
 
 
+def _updated_count(result: Any) -> int:
+    return int(result.rowcount or 0)
+
+
 def _updated(result: Any) -> bool:
-    return int(result.rowcount or 0) > 0
+    return _updated_count(result) > 0
 
 
 async def fail_running_runs(
@@ -426,3 +445,17 @@ async def resume_user_jobs_for_key(
         .returning(Job.id)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def cancel_unstarted_jobs(session: AsyncSession, *, user_id: UUID, job_kind: str) -> int:
+    """Cancel the user's `queued` and `paused` jobs of one kind. A `running` job is left alone."""
+    stmt = (
+        update(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.job_kind == job_kind,
+            Job.status.in_(("queued", "paused")),
+        )
+        .values(status="cancelled", finished_at=func.now(), updated_at=func.now())
+    )
+    return _updated_count(await session.execute(stmt))

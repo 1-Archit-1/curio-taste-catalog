@@ -47,8 +47,13 @@ HIGH_CONFIDENCE_THRESHOLD = 0.85
 MAX_CANDIDATE_MATCHES = 5
 MATCH_CONCURRENCY = 8
 IMPORT_ROLES = ("self", "taste", "candidates")
-HISTORY_SOURCE_LABEL = "letterboxd"
+# What `watch_history.source` says about a row, by the kind of source that wrote it.
+HISTORY_SOURCE_LABELS = {"simkl": "simkl"}
+HISTORY_SOURCE_LABEL_DEFAULT = "letterboxd"
+# Letterboxd's signals. They are also the item kinds an import issue can carry.
 _WATCH_SIGNAL_KINDS = frozenset({"watched", "rating", "diary"})
+# Simkl adds a status per title; the item kind of the same name becomes the history status.
+_HISTORY_SIGNAL_KINDS = _WATCH_SIGNAL_KINDS | {"watching", "dropped"}
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _EARLIEST = datetime.min.replace(tzinfo=UTC)
 
@@ -235,21 +240,33 @@ def _merge_item_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     )
 
 
-def _history_rows(items: Sequence[SourceItem]) -> list[dict[str, object]]:
+def _history_status(kinds: set[str]) -> str:
+    """A title's watch history status from the item kinds a source holds for it."""
+    if "watching" in kinds:
+        return "watching"
+    if kinds & _WATCH_SIGNAL_KINDS:
+        return "watched"
+    return "dropped"
+
+
+def _history_rows(items: Sequence[SourceItem], *, source_label: str) -> list[dict[str, object]]:
     """One watch history row per title from a source's watch signals.
 
     The rating comes from `rating` items (a Letterboxd account's current rating), then from
-    diary entries, then from `watched` items. `watched_at` is the latest date any signal has.
+    diary entries, then from the title's status item (`watched`, `watching`, `dropped`).
+    `watched_at` is the latest date any signal has. The status is `watching` or `dropped` only
+    for a source that says so (Simkl); every Letterboxd signal means `watched`.
     """
     by_title: dict[tuple[str, int], dict[str, Any]] = {}
-    precedence = {"rating": 0, "diary": 1, "watched": 2}
+    precedence = {"rating": 0, "diary": 1, "watched": 2, "watching": 2, "dropped": 2}
     for item in items:
-        if item.item_kind not in _WATCH_SIGNAL_KINDS:
+        if item.item_kind not in _HISTORY_SIGNAL_KINDS:
             continue
         entry = by_title.setdefault(
             (item.media_type, item.tmdb_id),
-            {"rating": None, "rank": len(precedence), "watched_at": None},
+            {"rating": None, "rank": len(precedence), "watched_at": None, "kinds": set()},
         )
+        entry["kinds"].add(item.item_kind)
         rank = precedence[item.item_kind]
         if item.rating is not None and rank < entry["rank"]:
             entry["rating"], entry["rank"] = item.rating, rank
@@ -261,10 +278,10 @@ def _history_rows(items: Sequence[SourceItem]) -> list[dict[str, object]]:
         {
             "media_type": media_type,
             "tmdb_id": tmdb_id,
-            "status": "watched",
+            "status": _history_status(entry["kinds"]),
             "rating": entry["rating"],
             "watched_at": entry["watched_at"],
-            "source": HISTORY_SOURCE_LABEL,
+            "source": source_label,
         }
         for (media_type, tmdb_id), entry in sorted(by_title.items())
     ]
@@ -283,7 +300,8 @@ async def resync_watch_history(session: AsyncSession, *, user_id: UUID) -> None:
        no row yet and overwrites rows it owns; manual rows and rows owned by another source are
        never touched.
     """
-    source_ids = await sources_repo.list_user_self_source_ids(session, user_id=user_id)
+    sources = await sources_repo.list_user_self_sources(session, user_id=user_id)
+    source_ids = [source.id for source in sources]
     await sources_repo.delete_watch_history_owned_outside(
         session, user_id=user_id, keep_source_ids=source_ids
     )
@@ -291,10 +309,14 @@ async def resync_watch_history(session: AsyncSession, *, user_id: UUID) -> None:
         await sources_repo.delete_stale_owned_watch_history(
             session, user_id=user_id, source_id=source_id
         )
-    for source_id in source_ids:
-        items = await sources_repo.list_source_watch_signals(session, source_id=source_id)
+    for source in sources:
+        items = await sources_repo.list_source_watch_signals(session, source_id=source.id)
+        label = HISTORY_SOURCE_LABELS.get(source.kind, HISTORY_SOURCE_LABEL_DEFAULT)
         await sources_repo.upsert_owned_watch_history(
-            session, user_id=user_id, source_id=source_id, rows=_history_rows(items)
+            session,
+            user_id=user_id,
+            source_id=source.id,
+            rows=_history_rows(items, source_label=label),
         )
 
 
@@ -337,6 +359,8 @@ async def update_source_role(
     if pair is None:
         raise SourceNotFoundError("Source not found.")
     source, _ = pair
+    if source.kind == "simkl":
+        raise InvalidSourceOperationError("A Simkl connection is always a 'self' source.")
     updated = await sources_repo.update_user_source_role(
         session, user_id=user_id, source_id=source_id, role=role
     )
@@ -358,6 +382,9 @@ async def remove_user_source(
     if pair is None:
         raise SourceNotFoundError("Source not found.")
     source, _ = pair
+    if source.kind == "simkl":
+        # Deleting the source would drop the sealed tokens before Simkl is told to revoke them.
+        raise InvalidSourceOperationError("Disconnect Simkl instead of removing its source.")
     if source.owner_user_id == user_id:
         await sources_repo.delete_source(session, source_id=source_id)
     else:
@@ -493,6 +520,8 @@ async def refresh_rss_source(
     if pair is None:
         raise SourceNotFoundError("Source not found.")
     source, user_source = pair
+    if source.kind == "simkl":
+        raise InvalidSourceOperationError("Use Sync now to refresh Simkl.")
     if source.kind != "lb_diary_rss":
         raise InvalidSourceOperationError(
             "Only RSS sources can be refreshed; re-upload a ZIP for exports."

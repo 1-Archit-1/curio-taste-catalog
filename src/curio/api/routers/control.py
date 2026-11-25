@@ -90,7 +90,7 @@ from curio.api.schemas.sources import (
     SourceUpdateRequest,
 )
 from curio.clients.letterboxd import MAX_ZIP_BYTES, LetterboxdError, LetterboxdNotFoundError
-from curio.clients.providers import LLM_PROVIDERS, KeyType
+from curio.clients.providers import API_KEY_TYPES, LLM_PROVIDERS, KeyType
 from curio.crypto import PublicKeyNotConfiguredError
 from curio.db.models.jobs import Job, Run, RunEvent
 from curio.db.models.sources import ImportIssue
@@ -111,6 +111,15 @@ def _manifest_url(request: Request, settings: Settings, addon_token: str) -> str
     return f"{base}/{addon_token}/manifest.json"
 
 
+def _require_api_key_type(key_type: KeyType) -> None:
+    """Simkl is connected under Taste Sources; it has no key to paste, test or delete here."""
+    if key_type not in API_KEY_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"'{key_type.value}' is not an API key. Connect it under Taste Sources.",
+        )
+
+
 async def _build_settings_response(
     request: Request,
     session: AsyncSession,
@@ -119,7 +128,7 @@ async def _build_settings_response(
 ) -> SettingsResponse:
     metadata = await keys_service.list_user_key_metadata(session, user_id=user.id)
     keys_payload: dict[KeyType, KeyStatusResponse] = {}
-    for kt in KeyType:
+    for kt in API_KEY_TYPES:
         row = metadata.get(kt)
         keys_payload[kt] = KeyStatusResponse(
             configured=row is not None,
@@ -244,6 +253,7 @@ async def test_api_key(
     payload: ApiKeyRequest,
     _: CurrentUser,
 ) -> KeyTestResponse:
+    _require_api_key_type(key_type)
     result = await keys_service.test_api_key(key_type, payload.api_key)
     return KeyTestResponse(
         ok=result.ok,
@@ -260,6 +270,7 @@ async def save_api_key(
     session: DbSession,
     settings: AppSettings,
 ) -> KeySavedResponse:
+    _require_api_key_type(key_type)
     try:
         row = await keys_service.set_user_api_key(
             session,
@@ -293,6 +304,7 @@ async def delete_api_key(
     user: CurrentUser,
     session: DbSession,
 ) -> KeyDeletedResponse:
+    _require_api_key_type(key_type)
     deleted = await keys_service.delete_user_api_key(session, user_id=user.id, key_type=key_type)
     return KeyDeletedResponse(deleted=deleted)
 
@@ -897,6 +909,8 @@ async def update_source(
         )
     except sources_service.SourceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except sources_service.InvalidSourceOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     return _source_to_out(summary)
 
 
@@ -914,6 +928,8 @@ async def delete_source(
         )
     except sources_service.SourceNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except sources_service.InvalidSourceOperationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     return MessageResponse(message="Source removed.")
 
 

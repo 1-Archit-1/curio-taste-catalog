@@ -68,6 +68,21 @@ Whenever `/api/*` Pydantic schemas change, regenerate and commit the TypeScript 
 npm --prefix frontend run gen:api
 ```
 
+## Connecting Simkl
+Users connect their own Simkl account under Taste Sources. The server needs one Simkl app, using AUTH V2 (AUTH V1 retires around April 2027).
+
+1. Register an app at <https://simkl.com/settings/developer/> with client type **Server apps & services**. The type can't be changed later.
+2. Register the redirect URI. It is exactly `<PUBLIC_BASE_URL>/api/simkl/callback`, for example `https://curio.example.com/api/simkl/callback`. Simkl compares it as a plain string, so a trailing slash, a different case or a query string won't match.
+3. Set `SIMKL_CLIENT_ID` and `SIMKL_CLIENT_SECRET` for the API and the worker (the worker uses the secret to refresh and revoke tokens), and `PUBLIC_BASE_URL` for the API. `SIMKL_REDIRECT_URI` overrides the derived URI if the public URL differs from what Simkl must see. Without all three the Simkl card says Simkl isn't set up.
+
+The API also needs `KEY_PUBLIC_KEY`, which seals the tokens (ADR 0002). Only the worker, with `KEY_PRIVATE_KEY`, can read them. Curio asks for the `media:read` scope only.
+
+**Local development.** Simkl ignores the port of a loopback redirect URI, so register `http://localhost/api/simkl/callback` and set `SIMKL_REDIRECT_URI=http://localhost:8000/api/simkl/callback` (use your real port). The exchange compares the URI byte for byte with the one sent to the consent page, so Curio sends the same string both times, port included. `localhost` and `127.0.0.1` are separate entries at Simkl, and the session cookie is per host too, so open the app at `http://localhost:8000/app/`, not `127.0.0.1`.
+
+Syncing is manual: the first sync runs on connect, and **Sync now** runs the next. Curio never polls Simkl on a timer, and a sync with no changes costs one request. Free Simkl accounts have 500 requests a day.
+
+Behind a reverse proxy, keep the query string of `/api/simkl/callback` out of access logs (it holds a one-time code). Curio's own uvicorn access log already redacts it.
+
 ## Tests and lint
 
 ```sh

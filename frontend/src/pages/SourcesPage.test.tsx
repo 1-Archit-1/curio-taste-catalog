@@ -186,6 +186,9 @@ describe("SourcesPage", () => {
           username: "archit",
         });
       }
+      if (url.pathname === "/api/simkl/connection" && method === "GET") {
+        return jsonResponse({ configured: false, connected: false });
+      }
       if (url.pathname === "/api/sources" && method === "GET") {
         return jsonResponse({ sources });
       }
@@ -366,6 +369,9 @@ describe("SourcesPage", () => {
       if (key === "GET /api/sources") return jsonResponse({ sources: [] });
       if (key === "GET /api/import-issues") {
         return jsonResponse({ issues: [], pending_count: 0 });
+      }
+      if (key === "GET /api/simkl/connection") {
+        return jsonResponse({ configured: false, connected: false });
       }
       return jsonResponse({ detail: `Unexpected ${key}` }, 500);
     });

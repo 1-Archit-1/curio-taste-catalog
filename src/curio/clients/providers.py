@@ -19,8 +19,19 @@ class KeyType(StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    # Not a pasted API key: the OAuth grant in `simkl_connections` (#6). It is a key type so that
+    # job pausing, the decrypt audit and `jobs.required_keys` treat it like the others.
+    SIMKL = "simkl"
 
 
+# The keys a user pastes into Settings. `KeyType.SIMKL` is connected under Taste Sources instead.
+API_KEY_TYPES: tuple[KeyType, ...] = (
+    KeyType.TMDB,
+    KeyType.GEMINI,
+    KeyType.OPENAI,
+    KeyType.ANTHROPIC,
+    KeyType.OPENROUTER,
+)
 LLM_PROVIDERS: tuple[KeyType, ...] = (
     KeyType.GEMINI,
     KeyType.OPENAI,

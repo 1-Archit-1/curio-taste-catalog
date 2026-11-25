@@ -1,0 +1,68 @@
+{
+  "shows": [
+    {
+      "show": {
+        "ids": {
+          "imdb": "tt0903747",
+          "simkl": 2,
+          "slug": "breaking-bad",
+          "tmdb": "1396",
+          "tvdb": "81189"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "imdb": "tt0306414",
+          "simkl": 3,
+          "slug": "the-wire",
+          "tmdb": "1438",
+          "tvdb": "79126"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "imdb": "tt5753856",
+          "simkl": 4,
+          "slug": "dark",
+          "tmdb": "70523",
+          "tvdb": "334824"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "imdb": "tt0158552",
+          "simkl": 297,
+          "slug": "charmed",
+          "tmdb": "1981",
+          "tvdb": "70626"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "imdb": "tt7366338",
+          "simkl": 5,
+          "slug": "chernobyl",
+          "tmdb": "87108",
+          "tvdb": "360893"
+        }
+      }
+    },
+    {
+      "show": {
+        "ids": {
+          "simkl": 6,
+          "slug": "a-show-simkl-cannot-map",
+          "tvdb": "999999"
+        }
+      }
+    }
+  ]
+}

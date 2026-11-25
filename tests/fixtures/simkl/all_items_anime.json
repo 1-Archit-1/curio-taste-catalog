@@ -1,0 +1,128 @@
+{
+  "anime": [
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "tv",
+      "last_watched": null,
+      "last_watched_at": "2025-02-03T09:00:00Z",
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "anidb": "23",
+          "anilist": "1",
+          "mal": "1",
+          "simkl": 37089,
+          "slug": "cowboy-bebop",
+          "tmdb": "30991"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Cowboy Bebop",
+        "year": 1998
+      },
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-02-03T10:00:00Z",
+      "user_rating": 10,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "movie",
+      "last_watched": null,
+      "last_watched_at": "2025-02-04T09:00:00Z",
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "anidb": "112",
+          "mal": "199",
+          "simkl": 12,
+          "slug": "spirited-away",
+          "tmdb": "129"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Spirited Away",
+        "year": 2001
+      },
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-02-04T10:00:00Z",
+      "user_rating": 9,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "tv",
+      "last_watched": null,
+      "last_watched_at": "2025-02-05T09:00:00Z",
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "anidb": "9541",
+          "mal": "16498",
+          "simkl": 38636,
+          "slug": "attack-on-titan",
+          "tmdb": "1429"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Attack on Titan",
+        "year": 2013
+      },
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": "2025-02-05T10:00:00Z",
+      "user_rating": 8,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "tv",
+      "last_watched": null,
+      "last_watched_at": "2025-02-06T09:00:00Z",
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "anidb": "13241",
+          "mal": "38524",
+          "simkl": 931899,
+          "slug": "attack-on-titan-season-3-part-2",
+          "tmdb": "1429"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Attack on Titan Season 3 Part 2",
+        "year": 2019
+      },
+      "status": "watching",
+      "total_episodes_count": 0,
+      "user_rated_at": null,
+      "user_rating": null,
+      "watched_episodes_count": 0
+    },
+    {
+      "added_to_watchlist_at": "2025-01-10T20:00:00Z",
+      "anime_type": "tv",
+      "last_watched": null,
+      "last_watched_at": null,
+      "next_to_watch": null,
+      "not_aired_episodes_count": 0,
+      "show": {
+        "ids": {
+          "mal": "9999",
+          "simkl": 13,
+          "slug": "some-anime-without-tmdb"
+        },
+        "poster": "00/00fakeposter",
+        "title": "Some Anime Without TMDB",
+        "year": 2015
+      },
+      "status": "completed",
+      "total_episodes_count": 0,
+      "user_rated_at": null,
+      "user_rating": null,
+      "watched_episodes_count": 0
+    }
+  ]
+}

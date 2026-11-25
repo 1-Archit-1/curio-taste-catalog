@@ -10,7 +10,8 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from curio import ADDON_NAME
 from curio.api.job_events import JobEventHub, listen_dsn
-from curio.api.routers import addon, control, health, ui
+from curio.api.routers import addon, control, health, simkl, ui
+from curio.clients.redaction import install_access_log_redaction
 from curio.db.engine import create_engine, create_session_factory
 from curio.settings import Settings
 
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the API app. Run with `uvicorn --factory curio.api.app:create_app`."""
     settings = settings or Settings()
+    install_access_log_redaction()
     if settings.key_private_key:
         # ADR 0002: only worker processes may hold the private key. Settings also reads `.env`,
         # so a local run could otherwise pick it up silently.
@@ -47,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(control.router)
+    app.include_router(simkl.router)
     app.include_router(ui.router)
     app.include_router(addon.router)
 

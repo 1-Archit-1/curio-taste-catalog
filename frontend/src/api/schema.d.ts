@@ -340,6 +340,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/simkl/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect
+         * @description Start the OAuth flow. The browser then goes to `authorize_url` on simkl.com.
+         */
+        post: operations["connect_api_simkl_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/simkl/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Connection */
+        get: operations["get_connection_api_simkl_connection_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect
+         * @description Remove the Simkl source and its history now. A worker revokes the grant at Simkl.
+         */
+        delete: operations["disconnect_api_simkl_connection_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/simkl/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Now
+         * @description Queue a `simkl_sync` job. 404 if Simkl isn't connected, 409 if a sync is already active
+         *     or the connection needs to be reconnected.
+         */
+        post: operations["sync_now_api_simkl_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/slots": {
         parameters: {
             query?: never;
@@ -743,7 +805,7 @@ export interface components {
          * KeyType
          * @enum {string}
          */
-        KeyType: "tmdb" | "gemini" | "openai" | "anthropic" | "openrouter";
+        KeyType: "tmdb" | "gemini" | "openai" | "anthropic" | "openrouter" | "simkl";
         /** LatestPresetJobResponse */
         LatestPresetJobResponse: {
             /** Events */
@@ -901,6 +963,33 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** SimklConnectResponse */
+        SimklConnectResponse: {
+            /** Authorize Url */
+            authorize_url: string;
+        };
+        /** SimklStatusResponse */
+        SimklStatusResponse: {
+            /** Account Name */
+            account_name?: string | null;
+            /** Configured */
+            configured: boolean;
+            /** Connected */
+            connected: boolean;
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Synced At */
+            last_synced_at?: string | null;
+            /**
+             * Needs Reconnect
+             * @default false
+             */
+            needs_reconnect: boolean;
+            /** Source Id */
+            source_id?: string | null;
+            /** Sync Job Id */
+            sync_job_id?: string | null;
+        };
         /** SlotAssignRequest */
         SlotAssignRequest: {
             /** Preset Id */
@@ -963,7 +1052,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv";
+            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv" | "simkl";
             /** Label */
             label: string;
             /** Last Error */
@@ -1009,7 +1098,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv";
+            kind: "lb_diary_rss" | "lb_profile_csv" | "lb_list_csv" | "simkl";
             /** Label */
             label: string;
             /** Recent Titles */
@@ -1733,6 +1822,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_api_simkl_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimklConnectResponse"];
+                };
+            };
+        };
+    };
+    get_connection_api_simkl_connection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimklStatusResponse"];
+                };
+            };
+        };
+    };
+    disconnect_api_simkl_connection_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+        };
+    };
+    sync_now_api_simkl_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
                 };
             };
         };

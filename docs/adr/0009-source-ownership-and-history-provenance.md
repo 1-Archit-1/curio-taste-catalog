@@ -15,7 +15,7 @@ Letterboxd stars (0.5 to 5) and Curio's `watch_history` ratings (0 to 10) were s
 
 - A public source is fetched once, however many users subscribe, and polled by the worker (`next_refresh_at`).
 - An owned source is private. Only its owner can subscribe, list, change, refresh or delete it; anyone else gets 404. Removing it deletes it, with its items, issues and the history it wrote.
-- Account integrations that need credentials (Simkl, next) will be owned source kinds, for the same reason: their data belongs to one user.
+- Account integrations that need credentials (Simkl, next) are owned source kinds, for the same reason: their data belongs to one user. Simkl is described in [ADR 0010](0010-simkl-connection-and-revocation.md).
 
 ### 2. Watch history records its source
 `watch_history.source_id` references the source that wrote the row, with `ON DELETE CASCADE`. Null means manual or another origin.
